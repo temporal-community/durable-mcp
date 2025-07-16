@@ -1,0 +1,7 @@
+# Sample firewall rules to simulate network outage
+block out quick to 23.199.232.133
+block out quick to 23.199.232.135
+block out quick to 23.32.152.112
+block out quick to 23.32.152.100
+block out quick to sancert.weather.gov.edgekey.net
+block out quick to e353369.dscg.akamaiedge.net
