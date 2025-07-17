@@ -48,7 +48,7 @@ Now, play with this a bit so see how it holds up against some of the challenges 
 The implementation of the `get_forecast` tool includes a 10 second sleep between the two HTTP requests. Experiment with the following:
 - Run it with no firewall rules
 - Add the firewall rules and enable the firewall
-- Disable the firewall, accept the MCP tool execution and then enable the firewall within 10 seconds. Disable the firewall on the 11th second and see what happens (spoiler: it still fails).
+- Disable the firewall, accept the MCP tool execution and then enable the firewall within 10 seconds. Disable the firewall on the 11th second and see what happens.
 
 
 ### Using `pfctl` on a Mac
