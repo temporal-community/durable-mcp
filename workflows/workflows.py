@@ -16,8 +16,8 @@ USER_AGENT = "weather-app/1.0"
 
 # Import activities and models, passing them through the sandbox
 with workflow.unsafe.imports_passed_through():
-    from activities import make_nws_request, make_hackernews_request
-    from models import HackerNewsParams
+    from workflows.activities import make_nws_request, make_hackernews_request
+    from shared.models import HackerNewsParams
 
 def format_alert(feature: dict) -> str:
     """Format an alert feature into a readable string."""

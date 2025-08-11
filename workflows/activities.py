@@ -3,7 +3,7 @@
 from typing import Any
 from temporalio import activity
 import httpx
-from models import HackerNewsParams
+from shared.models import HackerNewsParams
 
 USER_AGENT = "weather-app/1.0"
 
