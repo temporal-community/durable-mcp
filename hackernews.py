@@ -1,5 +1,3 @@
-import httpx
-import json
 from temporalio.client import Client
 from mcp.server.fastmcp import FastMCP
 
@@ -22,47 +20,14 @@ async def get_latest_stories() -> str:
     Returns:
         JSON string containing an array of the top 10 newest stories with their main fields.
     """
-    try:
-        # Algolia Hacker News API endpoint
-        algolia_url = "https://hn.algolia.com/api/v1/search_by_date"
-        
-        # Parameters for newest stories
-        params = {
-            "tags": "story",
-            "numericFilters": "points>0",  # Only stories with points
-            "hitsPerPage": 100,
-            "page": 0
-        }
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.get(algolia_url, params=params)
-            
-            if response.status_code != 200:
-                return json.dumps({"error": "Failed to fetch stories from Algolia API"})
-            
-            data = response.json()
-            hits = data.get("hits", [])
-            
-            # Extract the main fields from each story
-            stories = []
-            for hit in hits:
-                story_summary = {
-                    "id": hit.get("objectID"),
-                    "title": hit.get("title"),
-                    "url": hit.get("url"),
-                    "points": hit.get("points"),
-                    "author": hit.get("author"),
-                    "created_at": hit.get("created_at"),
-                    "num_comments": hit.get("num_comments"),
-                    "story_text": hit.get("story_text")
-                }
-                stories.append(story_summary)
-            
-            return json.dumps(stories, indent=2)
-            
-    except Exception as e:
-        return json.dumps({"error": f"Failed to fetch stories: {str(e)}"})
-
+    # The business logic has been moved into the temporal workflow, the mcp tool kicks off the workflow
+    client = await get_temporal_client()
+    handle = await client.start_workflow(
+        "GetLatestStories",
+        id="hackernews-latest-stories",
+        task_queue="hackernews-task-queue"
+    )
+    return await handle.result()
 
 if __name__ == "__main__":
     # Initialize and run the server

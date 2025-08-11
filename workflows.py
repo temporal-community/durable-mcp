@@ -1,6 +1,7 @@
 from datetime import timedelta
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+import json
 
 retry_policy = RetryPolicy(
     maximum_attempts=0,  # Infinite retries
@@ -12,6 +13,11 @@ retry_policy = RetryPolicy(
 # Constants
 NWS_API_BASE = "https://api.weather.gov"
 USER_AGENT = "weather-app/1.0"
+
+# Import activities and models, passing them through the sandbox
+with workflow.unsafe.imports_passed_through():
+    from activities import make_nws_request, make_hackernews_request
+    from models import HackerNewsParams
 
 def format_alert(feature: dict) -> str:
     """Format an alert feature into a readable string."""
@@ -35,7 +41,7 @@ class GetAlerts:
         """
         url = f"{NWS_API_BASE}/alerts/active/area/{state}"
         data = await workflow.execute_activity(
-            "make_nws_request",
+            make_nws_request,
             url,
             schedule_to_close_timeout=timedelta(seconds=40),
             retry_policy=retry_policy,
@@ -63,7 +69,7 @@ class GetForecast:
         # First get the forecast grid endpoint
         points_url = f"{NWS_API_BASE}/points/{latitude},{longitude}"
         points_data = await workflow.execute_activity(
-            "make_nws_request",
+            make_nws_request,
             points_url,
             schedule_to_close_timeout=timedelta(seconds=40),
             retry_policy=retry_policy,
@@ -77,7 +83,7 @@ class GetForecast:
         # Get the forecast URL from the points response
         forecast_url = points_data["properties"]["forecast"]
         forecast_data = await workflow.execute_activity(
-            "make_nws_request",
+            make_nws_request,
             forecast_url,
             schedule_to_close_timeout=timedelta(seconds=40),
             retry_policy=retry_policy,
@@ -98,3 +104,44 @@ class GetForecast:
             forecasts.append(forecast)
 
         return "\n---\n".join(forecasts)
+
+@workflow.defn
+class GetLatestStories:
+    @workflow.run
+    async def get_latest_stories(self) -> str:
+        """Get a summary of the top 100 newest stories on Hacker News using Algolia API.
+
+        Returns:
+            JSON string containing an array of the top 10 newest stories with their main fields.
+        """
+        # Pass a single dataclass instance to the activity
+        params = HackerNewsParams()
+
+        data = await workflow.execute_activity(
+            make_hackernews_request,
+            params,
+            schedule_to_close_timeout=timedelta(seconds=40),
+            retry_policy=retry_policy,
+        )
+
+        if not data or "hits" not in data:
+            return json.dumps({"error": "Failed to fetch stories from Algolia API"})
+
+        hits = data.get("hits", [])
+
+        # Extract the main fields from each story
+        stories = []
+        for hit in hits:
+            story_summary = {
+                "id": hit.get("objectID"),
+                "title": hit.get("title"),
+                "url": hit.get("url"),
+                "points": hit.get("points"),
+                "author": hit.get("author"),
+                "created_at": hit.get("created_at"),
+                "num_comments": hit.get("num_comments"),
+                "story_text": hit.get("story_text"),
+            }
+            stories.append(story_summary)
+
+        return json.dumps(stories, indent=2)

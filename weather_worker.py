@@ -1,4 +1,4 @@
-# worker.py
+# weather_worker.py
 
 import asyncio
 from temporalio.client import Client
