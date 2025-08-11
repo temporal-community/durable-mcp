@@ -8,6 +8,13 @@
           "run",
           "weather.py"
         ]
-      }
+      },
+      "hackernews": {
+        "command": "uv",
+        "args": [
+          "--directory",
+          "<full path to the directory containing the hackernews.py>",
+          "run",
+          "hackernews.py"
     }
 }
