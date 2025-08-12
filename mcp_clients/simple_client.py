@@ -6,48 +6,51 @@ This client demonstrates how to connect to MCP servers and interact with them.
 """
 
 import asyncio
-import json
-from typing import Dict, Any, List
-from mcp.client import Client as FastMCPClient
+from typing import Dict, Any
+from fastmcp import Client
 
 
 class SimpleMCPClient:
     """A simple MCP client that can connect to MCP servers."""
     
-    def __init__(self, server_name: str, server_command: List[str]):
+    def __init__(self, server_name: str, server_script: str):
         """
         Initialize the MCP client.
         
         Args:
             server_name: Name of the server for identification
-            server_command: Command to start the MCP server
+            server_script: Path to the MCP server script (.py)
         """
         self.server_name = server_name
-        self.server_command = server_command
-        self.client = FastMCPClient()
+        self.server_script = server_script
+        self.client = Client(self.server_script)
+        self._entered = False
         
     async def connect(self):
         """Connect to the MCP server."""
         try:
-            await self.client.connect(self.server_command)
+            await self.client.__aenter__()
+            self._entered = True
             print(f"✅ Connected to {self.server_name} server")
         except Exception as e:
             print(f"❌ Failed to connect to {self.server_name} server: {e}")
             raise
     
-    async def list_tools(self) -> List[Dict[str, Any]]:
+    async def list_tools(self):
         """List all available tools from the server."""
         try:
             tools = await self.client.list_tools()
             print(f"🔧 Available tools from {self.server_name}:")
             for tool in tools:
-                print(f"  - {tool['name']}: {tool.get('description', 'No description')}")
+                name = tool.get("name") if isinstance(tool, dict) else getattr(tool, "name", str(tool))
+                desc = tool.get("description") if isinstance(tool, dict) else getattr(tool, "description", "No description")
+                print(f"  - {name}: {desc}")
             return tools
         except Exception as e:
             print(f"❌ Failed to list tools from {self.server_name}: {e}")
             return []
     
-    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
+    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]):
         """Call a specific tool on the server."""
         try:
             result = await self.client.call_tool(tool_name, arguments)
@@ -57,22 +60,24 @@ class SimpleMCPClient:
             print(f"❌ Failed to call {tool_name} on {self.server_name}: {e}")
             raise
     
-    async def get_weather(self, latitude: float, longitude: float) -> Dict[str, Any]:
+    async def get_weather(self, latitude: float, longitude: float):
         """Get weather forecast for a location."""
         return await self.call_tool("get_forecast", {"latitude": latitude, "longitude": longitude})
     
-    async def get_alerts(self, state: str) -> Dict[str, Any]:
+    async def get_alerts(self, state: str):
         """Get weather alerts for a US state."""
         return await self.call_tool("get_alerts", {"state": state})
     
-    async def get_news(self, limit: int = 5) -> Dict[str, Any]:
-        """Get news articles."""
-        return await self.call_tool("get_news", {"limit": limit})
+    async def get_news(self):
+        """Get newest HackerNews stories summary."""
+        return await self.call_tool("get_latest_stories", {})
     
     async def disconnect(self):
         """Disconnect from the MCP server."""
         try:
-            await self.client.disconnect()
+            if self._entered:
+                await self.client.__aexit__(None, None, None)
+                self._entered = False
             print(f"🔌 Disconnected from {self.server_name} server")
         except Exception as e:
             print(f"❌ Error disconnecting from {self.server_name}: {e}")
@@ -86,7 +91,7 @@ async def demo_weather_client():
     # Create weather client
     weather_client = SimpleMCPClient(
         "Weather",
-        ["python", "mcp_servers/weather.py"]
+        "mcp_servers/weather.py"
     )
     
     try:
@@ -99,12 +104,12 @@ async def demo_weather_client():
         # Get weather for a location
         print("\n🌡️  Getting weather information...")
         weather_result = await weather_client.get_weather(37.7749, -122.4194)  # San Francisco coordinates
-        print(f"Weather result: {json.dumps(weather_result, indent=2)}")
+        print(f"Weather result: {weather_result}")
         
         # Get weather alerts
         print("\n⚠️  Getting weather alerts...")
         alerts_result = await weather_client.get_alerts("CA")
-        print(f"Alerts result: {json.dumps(alerts_result, indent=2)}")
+        print(f"Alerts result: {alerts_result}")
         
     except Exception as e:
         print(f"Demo failed: {e}")
@@ -120,7 +125,7 @@ async def demo_news_client():
     # Create news client
     news_client = SimpleMCPClient(
         "HackerNews",
-        ["python", "mcp_servers/hackernews.py"]
+        "mcp_servers/hackernews.py"
     )
     
     try:
@@ -132,8 +137,8 @@ async def demo_news_client():
         
         # Get news articles
         print("\n📰 Getting news articles...")
-        news_result = await news_client.get_news(limit=3)
-        print(f"News result: {json.dumps(news_result, indent=2)}")
+        news_result = await news_client.get_news()
+        print(f"News result: {news_result}")
         
     except Exception as e:
         print(f"Demo failed: {e}")

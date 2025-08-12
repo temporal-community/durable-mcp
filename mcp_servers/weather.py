@@ -1,5 +1,5 @@
 from temporalio.client import Client
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 # Initialize FastMCP server
 mcp = FastMCP("weather")
@@ -13,7 +13,7 @@ async def get_temporal_client():
         temporal_client = await Client.connect("localhost:7233")
     return temporal_client
 
-@mcp.tool()
+@mcp.tool
 async def get_alerts(state: str) -> str:
     """Get weather alerts for a US state.
 
@@ -30,7 +30,7 @@ async def get_alerts(state: str) -> str:
     )
     return await handle.result()
 
-@mcp.tool()
+@mcp.tool
 async def get_forecast(latitude: float, longitude: float) -> str:
     """Get weather forecast for a location.
 

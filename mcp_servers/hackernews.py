@@ -1,5 +1,5 @@
 from temporalio.client import Client
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 # Initialize FastMCP server
 mcp = FastMCP("hackernews")
@@ -13,7 +13,7 @@ async def get_temporal_client():
         temporal_client = await Client.connect("localhost:7233")
     return temporal_client
 
-@mcp.tool()
+@mcp.tool
 async def get_latest_stories() -> str:
     """Get a summary of the top 100 newest stories on Hacker News using Algolia API.
 
