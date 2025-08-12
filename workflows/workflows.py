@@ -108,14 +108,14 @@ class GetForecast:
 @workflow.defn
 class GetLatestStories:
     @workflow.run
-    async def get_latest_stories(self) -> str:
+    async def get_latest_stories(self, query: str | None = None) -> str:
         """Get a summary of the top 100 newest stories on Hacker News using Algolia API.
 
         Returns:
             JSON string containing an array of the top 10 newest stories with their main fields.
         """
         # Pass a single dataclass instance to the activity
-        params = HackerNewsParams()
+        params = HackerNewsParams(query=query)
 
         data = await workflow.execute_activity(
             make_hackernews_request,
