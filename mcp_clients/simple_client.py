@@ -6,8 +6,12 @@ This client demonstrates how to connect to MCP servers and interact with them.
 """
 
 import asyncio
+import os
+import json
 from typing import Dict, Any
 from fastmcp import Client
+from dotenv import load_dotenv
+from litellm import acompletion
 
 
 class SimpleMCPClient:
@@ -146,17 +150,160 @@ async def demo_news_client():
         await news_client.disconnect()
 
 
+async def prompt_user_and_invoke_llm() -> None:
+    """Prompt the user, let the LLM decide which MCP tool to call (if any), and print the result."""
+    # Helper: serialize tool metadata into a consistent shape for prompting
+    def serialize_tool(tool: Any) -> dict[str, Any]:
+        if isinstance(tool, dict):
+            return {
+                "name": tool.get("name"),
+                "description": tool.get("description"),
+                "input_schema": tool.get("input_schema"),
+            }
+        return {
+            "name": getattr(tool, "name", str(tool)),
+            "description": getattr(tool, "description", ""),
+            "input_schema": getattr(tool, "input_schema", None),
+        }
+
+    # Helper: attempt to extract a JSON object from model output
+    def extract_json(text: str) -> str | None:
+        text = text.strip()
+        if text.startswith("```"):
+            lines = [ln for ln in text.splitlines() if not ln.strip().startswith("```")]
+            text = "\n".join(lines).strip()
+        try:
+            start = text.index("{")
+            end = text.rindex("}") + 1
+            return text[start:end]
+        except ValueError:
+            return None
+
+    # Prepare MCP clients for available servers
+    weather_client = SimpleMCPClient("Weather", "mcp_servers/weather.py")
+    news_client = SimpleMCPClient("HackerNews", "mcp_servers/hackernews.py")
+    tool_name_to_client: dict[str, SimpleMCPClient] = {}
+    combined_tools: list[dict[str, Any]] = []
+
+    try:
+        load_dotenv()
+        user_prompt = input("\n💬 Enter a prompt for the LLM (OpenAI via LiteLLM): ")
+        if not user_prompt or not user_prompt.strip():
+            print("No input provided. Skipping LLM call.")
+            return
+
+        # Connect and gather tools from both servers
+        await weather_client.connect()
+        await news_client.connect()
+        weather_tools = await weather_client.list_tools()
+        news_tools = await news_client.list_tools()
+
+        # Build mapping from tool name to the appropriate client and shape tool metadata
+        for t in weather_tools:
+            shaped = serialize_tool(t)
+            if shaped.get("name"):
+                tool_name_to_client[shaped["name"]] = weather_client
+                combined_tools.append(shaped)
+        for t in news_tools:
+            shaped = serialize_tool(t)
+            if shaped.get("name"):
+                tool_name_to_client[shaped["name"]] = news_client
+                combined_tools.append(shaped)
+
+        # Craft system prompt with available tools
+        tool_lines: list[str] = []
+        for t in combined_tools:
+            schema_str = json.dumps(t.get("input_schema"), indent=2) if t.get("input_schema") else "{}"
+            tool_lines.append(
+                f"- name: {t.get('name')}\n  description: {t.get('description')}\n  input_schema: {schema_str}"
+            )
+        tools_block = "\n".join(tool_lines) if tool_lines else "(no tools available)"
+
+        system_prompt = (
+            "You are a tool-selection agent. Given the user's request and the available MCP tools, "
+            "decide whether a tool should be invoked. If a tool is appropriate, reply ONLY with a JSON object "
+            "with the following exact structure (no extra text, no code fences):\n\n"
+            "{\n"
+            "  \"tool_call\": {\n"
+            "    \"tool_name\": \"<tool_name>\",\n"
+            "    \"parameters\": { }\n"
+            "  }\n"
+            "}\n\n"
+            "Parameters must conform to the tool's input_schema. If no tool should be invoked, respond with a "
+            "helpful natural-language answer and do NOT return JSON.\n\n"
+            "Available tools (name, description, input_schema):\n" + tools_block
+        )
+
+        model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        print(f"🤖 Querying {model_name} for tool selection...")
+        response = await acompletion(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=800,
+        )
+        content = response["choices"][0]["message"].get("content", "").strip()
+
+        # Try to parse tool_call JSON; otherwise treat as final answer
+        json_text = extract_json(content)
+        tool_call = None
+        if json_text:
+            try:
+                parsed = json.loads(json_text)
+                tool_call = parsed.get("tool_call") if isinstance(parsed, dict) else None
+            except Exception:
+                tool_call = None
+
+        if tool_call and isinstance(tool_call, dict):
+            tool_name = tool_call.get("tool_name")
+            parameters = tool_call.get("parameters") or {}
+            if not isinstance(parameters, dict):
+                parameters = {}
+            client_for_tool = tool_name_to_client.get(tool_name)
+            if not client_for_tool:
+                print(f"⚠️ Chosen tool '{tool_name}' not found. Model output below:\n{content}")
+            else:
+                print(f"🛠️ Invoking tool '{tool_name}' with parameters: {parameters}")
+                try:
+                    result = await client_for_tool.call_tool(tool_name, parameters)
+                    print("\n🔎 Tool result:")
+                    print(result)
+                except Exception as e:
+                    print(f"❌ Tool invocation failed: {e}")
+        else:
+            print("\n🧠 LLM response:")
+            print(content)
+
+    except Exception as e:
+        print(f"❌ LLM invocation failed: {e}")
+    finally:
+        # Always disconnect clients
+        try:
+            await weather_client.disconnect()
+        except Exception:
+            pass
+        try:
+            await news_client.disconnect()
+        except Exception:
+            pass
+
+
 async def main():
     """Main function to run the MCP client demos."""
     print("🚀 Starting MCP Client Demos")
     print("=" * 50)
     
     # Run weather demo
-    await demo_weather_client()
+    # await demo_weather_client()
     
     # Run news demo
-    await demo_news_client()
+    # await demo_news_client()
     
+    # After demos, prompt the user and invoke an LLM via LiteLLM/OpenAI
+    await prompt_user_and_invoke_llm()
+
     print("\n✅ All demos completed!")
 
 
