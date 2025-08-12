@@ -10,6 +10,7 @@ import os
 import json
 from typing import Dict, Any
 from fastmcp import Client
+from fastmcp.client.logging import LogMessage
 from dotenv import load_dotenv
 from litellm import acompletion
 
@@ -27,7 +28,12 @@ class SimpleMCPClient:
         """
         self.server_name = server_name
         self.server_script = server_script
-        self.client = Client(self.server_script)
+        # Attach handlers so servers can ask the user for input and send logs
+        self.client = Client(
+            self.server_script,
+            elicitation_handler=self._handle_elicitation,
+            log_handler=self._handle_log,
+        )
         self._entered = False
         
     async def connect(self):
@@ -39,6 +45,94 @@ class SimpleMCPClient:
         except Exception as e:
             print(f"❌ Failed to connect to {self.server_name} server: {e}")
             raise
+
+    async def _handle_elicitation(self, message: str, response_type: type, params, context):
+        print(f"🔍 Handling elicitation for {self.server_name}: {message}")
+        user_input = input(f"{message}: ")
+        # Try to construct using the first field name (works for single-field schemas like TopicSchema)
+        try:
+            field_name = next(iter(getattr(response_type, "model_fields").keys()))  # pydantic v2
+        except Exception:
+            try:
+                import dataclasses as _dc
+                field_name = _dc.fields(response_type)[0].name  # dataclass fallback
+            except Exception:
+                field_name = "value"
+        response_data = response_type(**{field_name: user_input})
+        return response_data
+
+
+    # async def _handle_elicitation(self, *args, **kwargs) -> dict:
+    #     """Handle MCP elicitation by prompting the user in the terminal.
+
+    #     Supports both (message, requested_schema, context) and (params, context) calling styles.
+    #     Returns a dict in the shape {"action": "accept"|"decline"|"cancel", "content": {...}}.
+    #     """
+    #     # Unpack parameters from possible call signatures
+    #     message = ""
+    #     schema = {}
+    #     if args:
+    #         first = args[0]
+    #         if isinstance(first, dict) and ("message" in first or "requestedSchema" in first or "schema" in first):
+    #             params = first
+    #             message = params.get("message", "")
+    #             schema = params.get("requestedSchema") or params.get("schema") or {}
+    #         else:
+    #             message = str(first)
+    #             if len(args) > 1:
+    #                 schema = args[1] or {}
+    #     else:
+    #         message = str(kwargs.get("message", ""))
+    #         schema = kwargs.get("requested_schema") or kwargs.get("schema") or {}
+
+    #     try:
+    #         if message:
+    #             print(f"\n📩 Elicitation request from {self.server_name}: {message}")
+    #         properties = {}
+    #         if isinstance(schema, dict):
+    #             properties = schema.get("properties") or {}
+
+    #         content: dict[str, Any] = {}
+    #         for key, meta in properties.items():
+    #             title = (meta or {}).get("title") or key
+    #             description = (meta or {}).get("description") or ""
+    #             enum = (meta or {}).get("enum")
+    #             typ = (meta or {}).get("type")
+    #             prompt = f"{title}"
+    #             if description:
+    #                 prompt += f" - {description}"
+    #             if enum:
+    #                 prompt += f" [{', '.join(map(str, enum))}]"
+    #             prompt += ": "
+
+    #             while True:
+    #                 raw = input(prompt).strip()
+    #                 if enum and raw not in [str(e) for e in enum]:
+    #                     print(f"Please choose one of: {', '.join(map(str, enum))}")
+    #                     continue
+    #                 if typ in ("number", "integer"):
+    #                     try:
+    #                         value = int(raw) if typ == "integer" else float(raw)
+    #                     except Exception:
+    #                         print("Please enter a valid number")
+    #                         continue
+    #                 elif typ == "boolean":
+    #                     value = raw.lower() in ("y", "yes", "true", "1")
+    #                 else:
+    #                     value = raw
+    #                 content[key] = value
+    #                 break
+
+    #         return {"action": "accept", "content": content}
+    #     except KeyboardInterrupt:
+    #         return {"action": "cancel", "content": {}}
+
+    async def _handle_log(self, message: LogMessage):
+        level = getattr(message, "level", "info")
+        data = getattr(message, "data", None)
+        text = getattr(message, "text", None)
+        content = data if data is not None else text
+        print(f"📝 [{self.server_name}][{level}] {content}")
     
     async def list_tools(self):
         """List all available tools from the server."""
@@ -292,6 +386,7 @@ async def prompt_user_and_invoke_llm() -> None:
                 {"role": "user", "content": user_prompt},
             ],
             max_tokens=800,
+            temperature=0.0,
         )
         content = response["choices"][0]["message"].get("content", "").strip()
 

@@ -27,12 +27,15 @@ async def make_hackernews_request(params: HackerNewsParams) -> dict[str, Any] | 
 
     Expects a single `HackerNewsParams` dataclass argument.
     """
-    api_params = {
+    api_params: dict[str, Any] = {
         "tags": params.tags,
         "numericFilters": params.numeric_filters,
         "hitsPerPage": params.hits_per_page,
         "page": params.page,
     }
+    # Include free-text query if provided
+    if params.query:
+        api_params["query"] = params.query
 
     headers = {
         "User-Agent": "hackernews-app/1.0",
