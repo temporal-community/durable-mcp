@@ -6,11 +6,10 @@ This client demonstrates more advanced patterns for working with MCP servers.
 """
 
 import asyncio
-import json
 import logging
 from typing import Dict, Any, List, Optional
 from contextlib import asynccontextmanager
-from mcp.client import Client as FastMCPClient
+from fastmcp import Client
 
 
 # Set up logging
@@ -21,18 +20,19 @@ logger = logging.getLogger(__name__)
 class AdvancedMCPClient:
     """An advanced MCP client with better error handling and connection management."""
     
-    def __init__(self, server_name: str, server_command: List[str]):
+    def __init__(self, server_name: str, server_script: str):
         """
         Initialize the advanced MCP client.
         
         Args:
             server_name: Name of the server for identification
-            server_command: Command to start the MCP server
+            server_script: Path to the MCP server script (.py)
         """
         self.server_name = server_name
-        self.server_command = server_command
-        self.client = FastMCPClient()
+        self.server_script = server_script
+        self.client = Client(self.server_script)
         self._connected = False
+        self._ctx_entered = False
         
     @property
     def is_connected(self) -> bool:
@@ -50,10 +50,11 @@ class AdvancedMCPClient:
             True if connection successful, False otherwise
         """
         try:
-            await asyncio.wait_for(
-                self.client.connect(self.server_command),
-                timeout=timeout
-            )
+            async def _enter():
+                if not self._ctx_entered:
+                    await self.client.__aenter__()
+                    self._ctx_entered = True
+            await asyncio.wait_for(_enter(), timeout=timeout)
             self._connected = True
             logger.info(f"✅ Connected to {self.server_name} server")
             return True
@@ -75,7 +76,9 @@ class AdvancedMCPClient:
             return True
             
         try:
-            await self.client.disconnect()
+            if self._ctx_entered:
+                await self.client.__aexit__(None, None, None)
+                self._ctx_entered = False
             self._connected = False
             logger.info(f"🔌 Disconnected from {self.server_name} server")
             return True
@@ -126,12 +129,10 @@ class AdvancedMCPClient:
     async def get_server_info(self) -> Dict[str, Any]:
         """Get server information."""
         try:
-            # This would depend on the specific MCP server implementation
-            # For now, we'll return basic info
             return {
                 "name": self.server_name,
                 "connected": self._connected,
-                "command": " ".join(self.server_command)
+                "script": self.server_script,
             }
         except Exception as e:
             logger.error(f"❌ Failed to get server info: {e}")
@@ -155,9 +156,9 @@ class MCPClientManager:
     def __init__(self):
         self.clients: Dict[str, AdvancedMCPClient] = {}
     
-    def add_client(self, name: str, server_command: List[str]) -> AdvancedMCPClient:
+    def add_client(self, name: str, server_script: str) -> AdvancedMCPClient:
         """Add a new MCP client."""
-        client = AdvancedMCPClient(name, server_command)
+        client = AdvancedMCPClient(name, server_script)
         self.clients[name] = client
         return client
     
@@ -202,8 +203,8 @@ async def demo_advanced_client():
     manager = MCPClientManager()
     
     # Add clients
-    weather_client = manager.add_client("Weather", ["python", "mcp_servers/weather.py"])
-    news_client = manager.add_client("HackerNews", ["python", "mcp_servers/hackernews.py"])
+    weather_client = manager.add_client("Weather", "mcp_servers/weather.py")
+    news_client = manager.add_client("HackerNews", "mcp_servers/hackernews.py")
     
     try:
         # Connect to all clients
@@ -215,33 +216,37 @@ async def demo_advanced_client():
         print("\n📊 Server Information:")
         for name, client in manager.clients.items():
             info = await client.get_server_info()
-            print(f"  {name}: {json.dumps(info, indent=2)}")
+            print(f"  {name}: {info}")
         
         # List tools from weather client
         print("\n🔧 Weather Server Tools:")
         weather_tools = await weather_client.list_tools()
         for tool in weather_tools:
-            print(f"  - {tool['name']}: {tool.get('description', 'No description')}")
+            name = tool.get("name") if isinstance(tool, dict) else getattr(tool, "name", str(tool))
+            desc = tool.get("description") if isinstance(tool, dict) else getattr(tool, "description", "No description")
+            print(f"  - {name}: {desc}")
         
         # List tools from news client
         print("\n🔧 News Server Tools:")
         news_tools = await news_client.list_tools()
         for tool in news_tools:
-            print(f"  - {tool['name']}: {tool.get('description', 'No description')}")
+            name = tool.get("name") if isinstance(tool, dict) else getattr(tool, "name", str(tool))
+            desc = tool.get("description") if isinstance(tool, dict) else getattr(tool, "description", "No description")
+            print(f"  - {name}: {desc}")
         
         # Test weather functionality
         print("\n🌤️  Testing Weather Functionality:")
         try:
             weather_result = await weather_client.call_tool("get_forecast", {"latitude": 40.7128, "longitude": -74.0060})  # New York
-            print(f"Weather result: {json.dumps(weather_result, indent=2)}")
+            print(f"Weather result: {weather_result}")
         except Exception as e:
             print(f"Weather test failed: {e}")
         
         # Test news functionality
         print("\n📰 Testing News Functionality:")
         try:
-            news_result = await news_client.call_tool("get_news", {"limit": 2})
-            print(f"News result: {json.dumps(news_result, indent=2)}")
+            news_result = await news_client.call_tool("get_latest_stories", {})
+            print(f"News result: {news_result}")
         except Exception as e:
             print(f"News test failed: {e}")
         
@@ -259,7 +264,7 @@ async def demo_context_manager():
     print("\n🔄 Context Manager Demo")
     print("=" * 30)
     
-    weather_client = AdvancedMCPClient("Weather", ["python", "mcp_servers/weather.py"])
+    weather_client = AdvancedMCPClient("Weather", "mcp_servers/weather.py")
     
     async with weather_client.connection() as client:
         print("✅ Connected via context manager")
@@ -271,7 +276,7 @@ async def demo_context_manager():
         # Test a tool call
         try:
             result = await client.call_tool("get_forecast", {"latitude": 51.5074, "longitude": -0.1278})  # London
-            print(f"Weather result: {json.dumps(result, indent=2)}")
+            print(f"Weather result: {result}")
         except Exception as e:
             print(f"Tool call failed: {e}")
     

@@ -6,14 +6,18 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "httpx>=0.28.1",
-    "mcp[cli]>=1.2.0",
     "temporalio>=1.11.1",
-    "fastmcp>=0.1.0",
+    "fastmcp>=2.0.0",
 ]
 
 [build-system]
 requires = [ "hatchling",]
 build-backend = "hatchling.build"
 
-[project.scripts]
-weather = "weather:main"
+[tool.hatch.build.targets.wheel]
+packages = [
+  "mcp_clients",
+  "mcp_servers",
+  "shared",
+  "workflows",
+]
