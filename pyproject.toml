@@ -8,6 +8,7 @@ dependencies = [
     "httpx>=0.28.1",
     "mcp[cli]>=1.2.0",
     "temporalio>=1.11.1",
+    "fastmcp>=0.1.0",
 ]
 
 [build-system]
