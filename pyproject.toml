@@ -8,6 +8,8 @@ dependencies = [
     "httpx>=0.28.1",
     "temporalio>=1.11.1",
     "fastmcp>=2.0.0",
+    "litellm>=1.48.0",
+    "python-dotenv>=1.0.1",
 ]
 
 [build-system]
