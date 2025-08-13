@@ -33,6 +33,7 @@ class SimpleMCPClient:
             self.server_script,
             elicitation_handler=self._handle_elicitation,
             log_handler=self._handle_log,
+            sampling_handler=self._handle_sampling,
         )
         self._entered = False
         
@@ -62,77 +63,69 @@ class SimpleMCPClient:
         return response_data
 
 
-    # async def _handle_elicitation(self, *args, **kwargs) -> dict:
-    #     """Handle MCP elicitation by prompting the user in the terminal.
-
-    #     Supports both (message, requested_schema, context) and (params, context) calling styles.
-    #     Returns a dict in the shape {"action": "accept"|"decline"|"cancel", "content": {...}}.
-    #     """
-    #     # Unpack parameters from possible call signatures
-    #     message = ""
-    #     schema = {}
-    #     if args:
-    #         first = args[0]
-    #         if isinstance(first, dict) and ("message" in first or "requestedSchema" in first or "schema" in first):
-    #             params = first
-    #             message = params.get("message", "")
-    #             schema = params.get("requestedSchema") or params.get("schema") or {}
-    #         else:
-    #             message = str(first)
-    #             if len(args) > 1:
-    #                 schema = args[1] or {}
-    #     else:
-    #         message = str(kwargs.get("message", ""))
-    #         schema = kwargs.get("requested_schema") or kwargs.get("schema") or {}
-
-    #     try:
-    #         if message:
-    #             print(f"\n📩 Elicitation request from {self.server_name}: {message}")
-    #         properties = {}
-    #         if isinstance(schema, dict):
-    #             properties = schema.get("properties") or {}
-
-    #         content: dict[str, Any] = {}
-    #         for key, meta in properties.items():
-    #             title = (meta or {}).get("title") or key
-    #             description = (meta or {}).get("description") or ""
-    #             enum = (meta or {}).get("enum")
-    #             typ = (meta or {}).get("type")
-    #             prompt = f"{title}"
-    #             if description:
-    #                 prompt += f" - {description}"
-    #             if enum:
-    #                 prompt += f" [{', '.join(map(str, enum))}]"
-    #             prompt += ": "
-
-    #             while True:
-    #                 raw = input(prompt).strip()
-    #                 if enum and raw not in [str(e) for e in enum]:
-    #                     print(f"Please choose one of: {', '.join(map(str, enum))}")
-    #                     continue
-    #                 if typ in ("number", "integer"):
-    #                     try:
-    #                         value = int(raw) if typ == "integer" else float(raw)
-    #                     except Exception:
-    #                         print("Please enter a valid number")
-    #                         continue
-    #                 elif typ == "boolean":
-    #                     value = raw.lower() in ("y", "yes", "true", "1")
-    #                 else:
-    #                     value = raw
-    #                 content[key] = value
-    #                 break
-
-    #         return {"action": "accept", "content": content}
-    #     except KeyboardInterrupt:
-    #         return {"action": "cancel", "content": {}}
-
     async def _handle_log(self, message: LogMessage):
         level = getattr(message, "level", "info")
         data = getattr(message, "data", None)
         text = getattr(message, "text", None)
         content = data if data is not None else text
         print(f"📝 [{self.server_name}][{level}] {content}")
+    
+    async def _handle_sampling(self, messages, params, context):
+        """Handle MCP sampling requests by invoking an LLM via LiteLLM.
+        Expected input shape (simplified):
+          - messages: list of {role: 'user'|'assistant', content: {type: 'text', text: '...'}}
+          - params: may include 'systemPrompt', 'temperature', 'maxTokens', 'modelPreferences'
+        Returns a string completion.
+        """
+        try:
+            load_dotenv()
+            model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+            print(f"🤖 Sampling using model: {model_name}")
+            print(f"🤖 Sampling using messages: {messages}")
+            print(f"🤖 Sampling using params: {params}")
+
+            # Convert MCP sampling messages to OpenAI-style chat messages
+            chat_messages: list[dict[str, str]] = []
+            system_prompt = None
+            if isinstance(params, dict):
+                system_prompt = params.get("systemPrompt")
+            if system_prompt:
+                chat_messages.append({"role": "system", "content": str(system_prompt)})
+
+            for msg in messages or []:
+                role = msg.get("role", "user")
+                content = msg.get("content")
+                text_content = None
+                if isinstance(content, dict) and content.get("type") == "text":
+                    text_content = content.get("text")
+                elif isinstance(content, str):
+                    text_content = content
+                if text_content is not None:
+                    chat_messages.append({"role": role, "content": str(text_content)})
+
+            temperature = 0.0
+            max_tokens = 800
+            if isinstance(params, dict):
+                if params.get("temperature") is not None:
+                    try:
+                        temperature = float(params.get("temperature"))
+                    except Exception:
+                        temperature = 0.0
+                if params.get("maxTokens") is not None:
+                    try:
+                        max_tokens = int(params.get("maxTokens"))
+                    except Exception:
+                        max_tokens = 800
+
+            response = await acompletion(
+                model=model_name,
+                messages=chat_messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return response["choices"][0]["message"].get("content", "")
+        except Exception as e:
+            return f"Sampling failed: {e}"
     
     async def list_tools(self):
         """List all available tools from the server."""
