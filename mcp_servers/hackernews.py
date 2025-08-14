@@ -60,7 +60,7 @@ async def _classify_with_sampling(ctx: Context, items: list[dict], buckets: List
         "OUTPUT FORMAT:\n{\n  \"categories\": { \"<bucket>\": [ <original items> ] }\n}\n"
     )
 
-    content = await ctx.sample(prompt_text, temperature=0.0, max_tokens=1200)
+    content = await ctx.sample("Please classify the following Hacker News items into the provided categories.", system_prompt=prompt_text, temperature=0.0, max_tokens=1200)
     await ctx.info("Classification completed" + str(content))
     text = (content or "").strip()
 

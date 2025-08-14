@@ -12,7 +12,7 @@ from typing import Dict, Any
 from fastmcp import Client
 from fastmcp.client.logging import LogMessage
 from dotenv import load_dotenv
-from litellm import acompletion
+from litellm import acompletion, litellm
 
 
 class SimpleMCPClient:
@@ -36,6 +36,8 @@ class SimpleMCPClient:
             sampling_handler=self._handle_sampling,
         )
         self._entered = False
+
+        litellm._turn_on_debug()
         
     async def connect(self):
         """Connect to the MCP server."""
@@ -84,45 +86,51 @@ class SimpleMCPClient:
             print(f"🤖 Sampling using messages: {messages}")
             print(f"🤖 Sampling using params: {params}")
 
-            # Convert MCP sampling messages to OpenAI-style chat messages
+            # Build OpenAI-compatible chat messages
             chat_messages: list[dict[str, str]] = []
-            system_prompt = None
-            if isinstance(params, dict):
-                system_prompt = params.get("systemPrompt")
-            if system_prompt:
-                chat_messages.append({"role": "system", "content": str(system_prompt)})
 
-            for msg in messages or []:
-                role = msg.get("role", "user")
-                content = msg.get("content")
-                text_content = None
-                if isinstance(content, dict) and content.get("type") == "text":
-                    text_content = content.get("text")
-                elif isinstance(content, str):
-                    text_content = content
-                if text_content is not None:
-                    chat_messages.append({"role": role, "content": str(text_content)})
+            # Pick up system prompt (attr or dict)
+            sys_prompt = None
+            try:
+                sys_prompt = getattr(params, "systemPrompt")
+            except Exception:
+                pass
+            if sys_prompt is None and isinstance(params, dict):
+                sys_prompt = params.get("systemPrompt")
+            if sys_prompt:
+                chat_messages.append({"role": "system", "content": str(sys_prompt)})
 
-            temperature = 0.0
-            max_tokens = 800
-            if isinstance(params, dict):
-                if params.get("temperature") is not None:
-                    try:
-                        temperature = float(params.get("temperature"))
-                    except Exception:
-                        temperature = 0.0
-                if params.get("maxTokens") is not None:
-                    try:
-                        max_tokens = int(params.get("maxTokens"))
-                    except Exception:
-                        max_tokens = 800
+            # Normalize messages to list
+            if messages is None:
+                iterable_messages = []
+            elif isinstance(messages, (list, tuple)):
+                iterable_messages = messages
+            else:
+                iterable_messages = [messages]
+
+            # Convert SamplingMessage objects to {role, content}
+            for m in iterable_messages:
+                role = getattr(m, "role", None)
+                if role not in ("user", "assistant", "system"):
+                    role = "user"
+                content_obj = getattr(m, "content", None)
+                text = None
+                if hasattr(content_obj, "text"):
+                    text = content_obj.text
+                elif isinstance(content_obj, dict):
+                    if content_obj.get("type") == "text":
+                        text = content_obj.get("text")
+                if text is None:
+                    text = str(content_obj) if content_obj is not None else ""
+                chat_messages.append({"role": role, "content": str(text)})
 
             response = await acompletion(
                 model=model_name,
                 messages=chat_messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
+                temperature=0.0,
+                max_tokens=800,
             )
+            print(f"🤖 response: {response}")
             return response["choices"][0]["message"].get("content", "")
         except Exception as e:
             return f"Sampling failed: {e}"
