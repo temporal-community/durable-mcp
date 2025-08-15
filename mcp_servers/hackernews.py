@@ -61,8 +61,23 @@ async def _classify_with_sampling(ctx: Context, items: list[dict], buckets: List
     )
 
     content = await ctx.sample("Please classify the following Hacker News items into the provided categories.", system_prompt=prompt_text, temperature=0.0, max_tokens=1200)
-    await ctx.info("Classification completed" + str(content))
-    text = (content or "").strip()
+    await ctx.info("Classification completed " + str(content))
+    # Normalize to string; content may be a TextContent-like object
+    if isinstance(content, str):
+        text = content.strip()
+    elif hasattr(content, "text"):
+        try:
+            text = str(getattr(content, "text", "")).strip()
+        except Exception:
+            text = str(content)
+    elif isinstance(content, dict):
+        if content.get("type") == "text" and isinstance(content.get("text"), str):
+            text = content.get("text", "").strip()
+        else:
+            text = json.dumps(content)
+    else:
+        text = str(content)
+    await ctx.info("Classification completed text = " + str(text))
 
     # Try strict JSON parsing; if it fails, attempt to extract a JSON object
     def _extract_json(text_in: str) -> str | None:
