@@ -35,57 +35,6 @@ Instructions: {props.get('instruction', 'No specific instructions provided')}
 """
 
 
-async def retrieve_content_and_summarize(stories: list[dict]) -> list[dict]:
-    """For each story with a URL, fetch content and add a short preview.
-
-    Returns the mutated list for convenience.
-    """
-
-    async def _process_story(story: dict) -> None:
-        url = story.get("url")
-        if not url:
-            # No URL; fallback to story_text if present
-            fallback_text = (story.get("story_text") or "").strip()
-            story["content_preview"] = fallback_text
-            return
-        try:
-            # First attempt: render with headless browser for dynamic sites
-            rendered_html = await workflow.execute_activity(
-                render_url_content,
-                url,
-                schedule_to_close_timeout=timedelta(seconds=45),
-                retry_policy=retry_policy,
-            )
-            content_source = rendered_html if rendered_html else None
-            # Fallback to simple HTTP fetch if rendering failed
-            if not content_source:
-                content_source = await workflow.execute_activity(
-                    fetch_url_content,
-                    url,
-                    schedule_to_close_timeout=timedelta(seconds=30),
-                    retry_policy=retry_policy,
-                )
-            text_only = ""
-            if isinstance(content_source, str) and content_source:
-                try:
-                    text_only = html_to_text(content_source)
-                except Exception:
-                    text_only = ""
-            # Final fallback chain: story_text -> raw content -> empty string
-            if not isinstance(text_only, str) or not text_only.strip():
-                text_only = (story.get("story_text") or "").strip() or (content_source or "")
-            story["content_preview"] = text_only
-        except Exception:
-            # If fetching content fails, fallback to story_text if available
-            story["content_preview"] = (story.get("story_text") or "").strip()
-            return
-
-    # Kick off processing for all stories concurrently
-    tasks = [_process_story(story) for story in stories]
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-    return stories
 
 
 @workflow.defn
@@ -205,10 +154,61 @@ class GetLatestStories:
             stories.append(story_summary)
 
         # For each story that has a URL, fetch a short preview of its contents via activity
-        await retrieve_content_and_summarize(stories)
+        await self.retrieve_content_and_summarize(stories)
 
         return json.dumps(stories, indent=2)
 
+
+    async def retrieve_content_and_summarize(self, stories: list[dict]) -> list[dict]:
+        """For each story with a URL, fetch content and add a short preview.
+        
+        Returns the mutated list for convenience.
+        """
+        async def _process_story(story: dict) -> None:
+            url = story.get("url")
+            if not url:
+                # No URL; fallback to story_text if present
+                fallback_text = (story.get("story_text") or "").strip()
+                story["content_preview"] = fallback_text
+                return
+            try:
+                # First attempt: render with headless browser for dynamic sites
+                rendered_html = await workflow.execute_activity(
+                    render_url_content,
+                    url,
+                    schedule_to_close_timeout=timedelta(seconds=45),
+                    retry_policy=retry_policy,
+                )
+                content_source = rendered_html if rendered_html else None
+                # Fallback to simple HTTP fetch if rendering failed
+                if not content_source:
+                    content_source = await workflow.execute_activity(
+                        fetch_url_content,
+                        url,
+                        schedule_to_close_timeout=timedelta(seconds=30),
+                        retry_policy=retry_policy,
+                    )
+                text_only = ""
+                if isinstance(content_source, str) and content_source:
+                    try:
+                        text_only = html_to_text(content_source)
+                    except Exception:
+                        text_only = ""
+                # Final fallback chain: story_text -> raw content -> empty string
+                if not isinstance(text_only, str) or not text_only.strip():
+                    text_only = (story.get("story_text") or "").strip() or (content_source or "")
+                story["content_preview"] = text_only
+            except Exception:
+                # If fetching content fails, fallback to story_text if available
+                story["content_preview"] = (story.get("story_text") or "").strip()
+                return
+
+        # Kick off processing for all stories concurrently
+        tasks = [_process_story(story) for story in stories]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        return stories
 
     @workflow.update
     def ping(self) -> str:
