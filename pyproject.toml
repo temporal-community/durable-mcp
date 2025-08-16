@@ -13,6 +13,8 @@ dependencies = [
     "litellm>=1.48.0",
     "python-dotenv>=1.0.1",
     "playwright>=1.46.0",
+    "beautifulsoup4>=4.12.2",
+    "trafilatura>=1.8.0",
 ]
 
 [build-system]
