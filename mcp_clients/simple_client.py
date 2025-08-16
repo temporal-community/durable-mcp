@@ -37,7 +37,7 @@ class SimpleMCPClient:
         )
         self._entered = False
 
-        litellm._turn_on_debug()
+        # litellm._turn_on_debug()
         
     async def connect(self):
         """Connect to the MCP server."""
