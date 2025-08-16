@@ -7,6 +7,7 @@ from html import unescape
 from html.parser import HTMLParser
 import re
 from html import unescape
+import asyncio
 
 retry_policy = RetryPolicy(
     maximum_attempts=0,  # Infinite retries
@@ -131,10 +132,11 @@ async def retrieve_content_and_summarize(stories: list[dict]) -> list[dict]:
 
     Returns the mutated list for convenience.
     """
-    for story in stories:
+
+    async def _process_story(story: dict) -> None:
         url = story.get("url")
         if not url:
-            continue
+            return
         try:
             # First attempt: render with headless browser for dynamic sites
             rendered_html = await workflow.execute_activity(
@@ -154,10 +156,16 @@ async def retrieve_content_and_summarize(stories: list[dict]) -> list[dict]:
                 )
             if content_source:
                 text_only = _html_to_text(content_source)
-                story["content_preview"] = text_only[:500]
+                story["content_preview"] = text_only
         except Exception:
             # If fetching content fails, skip adding preview
-            continue
+            return
+
+    # Kick off processing for all stories concurrently
+    tasks = [_process_story(story) for story in stories]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
     return stories
 
 @workflow.defn
