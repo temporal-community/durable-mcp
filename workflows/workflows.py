@@ -2,6 +2,11 @@ from datetime import timedelta
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 import json
+import re
+from html import unescape
+from html.parser import HTMLParser
+import re
+from html import unescape
 
 retry_policy = RetryPolicy(
     maximum_attempts=0,  # Infinite retries
@@ -16,7 +21,7 @@ USER_AGENT = "weather-app/1.0"
 
 # Import activities and models, passing them through the sandbox
 with workflow.unsafe.imports_passed_through():
-    from workflows.activities import make_nws_request, make_hackernews_request
+    from workflows.activities import make_nws_request, make_hackernews_request, fetch_url_content, render_url_content
     from shared.models import HackerNewsParams
 
 def format_alert(feature: dict) -> str:
@@ -29,6 +34,98 @@ Severity: {props.get('severity', 'Unknown')}
 Description: {props.get('description', 'No description available')}
 Instructions: {props.get('instruction', 'No specific instructions provided')}
 """
+
+class _HTMLTextExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._chunks: list[str] = []
+        self._ignore_depth: int = 0
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag in ("script", "style"):
+            self._ignore_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("script", "style") and self._ignore_depth > 0:
+            self._ignore_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self._ignore_depth == 0:
+            self._chunks.append(data)
+
+    def handle_comment(self, data: str) -> None:
+        # Ignore comments entirely
+        pass
+
+    def get_text(self) -> str:
+        return "".join(self._chunks)
+
+def _html_to_text(content: str) -> str:
+    """Convert HTML to plain text, removing HTML/JS, images, and normalizing whitespace."""
+    extractor = _HTMLTextExtractor()
+    extractor.feed(content)
+    text = extractor.get_text()
+    text = unescape(text)
+    # Remove any residual angle-bracketed artifacts
+    text = re.sub(r"<[^>]+>", " ", text)
+    # Remove markdown image syntax ![alt](url)
+    text = re.sub(r"!\[[^\]]*\]\([^\)]*\)", " ", text)
+    # Remove data URI references
+    text = re.sub(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+", " ", text)
+    # Remove any stray 'javascript:' tokens
+    text = re.sub(r"javascript:\s*", "", text, flags=re.IGNORECASE)
+    # Collapse whitespace
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+def _html_to_text(content: str) -> str:
+    """Convert HTML content to plain text.
+
+    Removes script/style blocks and tags, unescapes entities, and normalizes whitespace.
+    """
+    # Remove script and style blocks
+    content = re.sub(r"(?is)<(script|style)[^>]*>.*?</\\1>", " ", content)
+    # Strip all remaining tags
+    content = re.sub(r"(?s)<[^>]+>", " ", content)
+    # Unescape HTML entities
+    content = unescape(content)
+    # Collapse whitespace
+    content = re.sub(r"\s+", " ", content).strip()
+    return content
+
+async def retrieve_content_and_summarize(stories: list[dict]) -> list[dict]:
+    """For each story with a URL, fetch content and add a short preview.
+
+    Returns the mutated list for convenience.
+    """
+    for story in stories:
+        url = story.get("url")
+        if not url:
+            continue
+        try:
+            # First attempt: render with headless browser for dynamic sites
+            rendered_html = await workflow.execute_activity(
+                render_url_content,
+                url,
+                schedule_to_close_timeout=timedelta(seconds=45),
+                retry_policy=retry_policy,
+            )
+            content_source = rendered_html if rendered_html else None
+            # Fallback to simple HTTP fetch if rendering failed
+            if not content_source:
+                content_source = await workflow.execute_activity(
+                    fetch_url_content,
+                    url,
+                    schedule_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=retry_policy,
+                )
+            if content_source:
+                text_only = _html_to_text(content_source)
+                story["content_preview"] = text_only[:500]
+        except Exception:
+            # If fetching content fails, skip adding preview
+            continue
+    return stories
 
 @workflow.defn
 class GetAlerts:
@@ -143,6 +240,9 @@ class GetLatestStories:
                 "story_text": hit.get("story_text"),
             }
             stories.append(story_summary)
+
+        # For each story that has a URL, fetch a short preview of its contents via activity
+        await retrieve_content_and_summarize(stories)
 
         return json.dumps(stories, indent=2)
 

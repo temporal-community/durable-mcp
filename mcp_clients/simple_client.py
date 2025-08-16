@@ -331,7 +331,7 @@ async def setup_tool_selection() -> tuple[str, dict[str, SimpleMCPClient], list[
     return system_prompt, tool_name_to_client, clients
 
 
-async def handle_model_output(content: str, tool_name_to_client: dict[str, SimpleMCPClient]) -> None:
+async def handle_tool_selection_LLM_output(content: str, tool_name_to_client: dict[str, SimpleMCPClient]) -> None:
     """Process the model output: parse tool call JSON and invoke the tool or print response."""
     json_text = extract_json(content)
     tool_call = None
@@ -391,7 +391,7 @@ async def prompt_user_and_invoke_llm() -> None:
         )
         content = response["choices"][0]["message"].get("content", "").strip()
 
-        await handle_model_output(content, tool_name_to_client)
+        await handle_tool_selection_LLM_output(content, tool_name_to_client)
 
     except Exception as e:
         print(f"❌ LLM invocation failed: {e}")

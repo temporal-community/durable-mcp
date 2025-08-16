@@ -12,6 +12,7 @@ dependencies = [
     "pydantic>=2.6.0",
     "litellm>=1.48.0",
     "python-dotenv>=1.0.1",
+    "playwright>=1.46.0",
 ]
 
 [build-system]

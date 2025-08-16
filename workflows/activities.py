@@ -4,6 +4,8 @@ from typing import Any
 from temporalio import activity
 import httpx
 from shared.models import HackerNewsParams
+from typing import Optional
+import asyncio
 
 USER_AGENT = "weather-app/1.0"
 
@@ -51,3 +53,70 @@ async def make_hackernews_request(params: HackerNewsParams) -> dict[str, Any] | 
         )
         response.raise_for_status()
         return response.json()
+
+@activity.defn
+async def fetch_url_content(url: str) -> str | None:
+    """Fetch the raw content of a given URL and return it as text.
+
+    Args:
+        url: Absolute URL to fetch.
+
+    Returns:
+        The response body as text if the request is successful.
+    """
+    headers = {
+        "User-Agent": "content-fetcher/1.0",
+        "Accept": "text/html,application/json,text/plain;q=0.9,*/*;q=0.8",
+    }
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        response = await client.get(url, headers=headers, timeout=10.0)
+        response.raise_for_status()
+        content_type = response.headers.get("Content-Type", "")
+        # Skip images entirely
+        if content_type.lower().startswith("image/"):
+            return ""
+        return response.text
+
+@activity.defn
+async def render_url_content(url: str, wait_selector: Optional[str] = None, timeout_seconds: float = 20.0) -> str | None:
+    """Render a URL with a headless browser and return the resulting HTML.
+
+    Uses Playwright (Chromium). Optionally waits for a CSS selector to appear.
+    """
+    try:
+        # Import inside activity to avoid loading in workflow sandbox
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context()
+            page = await context.new_page()
+
+            # Block image and media requests to avoid downloading large assets
+            async def _route_handler(route):
+                if route.request.resource_type in {"image", "media", "font"}:
+                    await route.abort()
+                else:
+                    await route.continue_()
+
+            await page.route("**/*", _route_handler)
+
+            await page.goto(url, wait_until="domcontentloaded", timeout=int(timeout_seconds * 1000))
+            if wait_selector:
+                try:
+                    await page.wait_for_selector(wait_selector, timeout=int(timeout_seconds * 1000))
+                except Exception:
+                    pass
+            # Give the page a brief moment to settle dynamic content
+            try:
+                await page.wait_for_load_state("networkidle", timeout=int(timeout_seconds * 1000))
+            except Exception:
+                pass
+
+            # Extract just the visible text content
+            content = await page.evaluate("document.body ? document.body.innerText : ''")
+            await context.close()
+            await browser.close()
+            return content
+    except Exception:
+        return None
