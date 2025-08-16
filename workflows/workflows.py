@@ -145,3 +145,11 @@ class GetLatestStories:
             stories.append(story_summary)
 
         return json.dumps(stories, indent=2)
+
+    @workflow.update
+    def ping(self) -> str:
+        """No-op update used for update-with-start to ensure a handle.
+
+        Returns a simple string without mutating workflow state.
+        """
+        return "ok"

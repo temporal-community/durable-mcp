@@ -121,18 +121,32 @@ async def get_latest_stories(ctx: Context) -> str:
         JSON string: {"categories": {"<bucket>": [items...]}}
     """
 
+    
+
     # Elicit topic/keyword from the user
     query = await _elicit_topic(ctx)
     await ctx.info("Elicitation completed - topic: " + str(query) + "; starting workflow")
 
-    # The business logic has been moved into the temporal workflow, the mcp tool kicks off the workflow
+    # The business logic has been moved into the temporal workflow; start via update-with-start
     client = await get_temporal_client()
-    handle = await client.start_workflow(
+    # Use Update-With-Start to ensure we get a handle even if the workflow does not exist yet
+    from temporalio.client import WithStartWorkflowOperation
+    from temporalio.common import WorkflowIDConflictPolicy
+    start_op = WithStartWorkflowOperation(
         "GetLatestStories",
         query,
         id="hackernews-latest-stories",
-        task_queue="hackernews-task-queue"
+        task_queue="hackernews-task-queue",
+        id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING
     )
+    # Execute a no-op update that exists on the workflow to trigger start-if-needed
+    await client.execute_update_with_start_workflow(
+        update="ping",
+        args=[],
+        start_workflow_operation=start_op,
+    )
+    # Retrieve a handle for future interactions and to get the result now
+    handle = await start_op.workflow_handle()
     raw_result = await handle.result()
 
     # Parse workflow result (expected to be a JSON array of story objects)
