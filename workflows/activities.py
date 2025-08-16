@@ -113,8 +113,27 @@ async def render_url_content(url: str, wait_selector: Optional[str] = None, time
             except Exception:
                 pass
 
-            # Extract just the visible text content
-            content = await page.evaluate("document.body ? document.body.innerText : ''")
+            # Try to use Mozilla Readability to extract the main article text
+            try:
+                await page.add_script_tag(url="https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/Readability.min.js")
+                content = await page.evaluate(
+                    """
+                    () => {
+                        try {
+                            const doc = document.cloneNode(true);
+                            const reader = new Readability(doc);
+                            const res = reader.parse();
+                            if (res && res.textContent) {
+                                return res.textContent;
+                            }
+                        } catch (e) { /* fall through */ }
+                        return document.body ? document.body.innerText : '';
+                    }
+                    """
+                )
+            except Exception:
+                # Fallback to visible text if readability script fails
+                content = await page.evaluate("document.body ? document.body.innerText : ''")
             await context.close()
             await browser.close()
             return content

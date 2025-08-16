@@ -23,6 +23,9 @@ USER_AGENT = "weather-app/1.0"
 with workflow.unsafe.imports_passed_through():
     from workflows.activities import make_nws_request, make_hackernews_request, fetch_url_content, render_url_content
     from shared.models import HackerNewsParams
+    # Import libraries that are not compatible with the workflow sandbox
+    from bs4 import BeautifulSoup
+    import trafilatura
 
 def format_alert(feature: dict) -> str:
     """Format an alert feature into a readable string."""
@@ -61,19 +64,49 @@ class _HTMLTextExtractor(HTMLParser):
         return "".join(self._chunks)
 
 def _html_to_text(content: str) -> str:
-    """Convert HTML to plain text, removing HTML/JS, images, and normalizing whitespace."""
-    extractor = _HTMLTextExtractor()
-    extractor.feed(content)
-    text = extractor.get_text()
+    """Extract main textual content from HTML with trafilatura, with BS4 fallback.
+
+    The goal is to avoid boilerplate: scripts, styles, cookie banners, nav, CSS/JS blobs.
+    """
+    # If content already looks like plain text (no '<' chars), skip heavy HTML cleaning
+    if "<" not in content:
+        text = content
+    else:
+        # First choice: trafilatura main content extraction
+        try:
+            extracted = trafilatura.extract(
+                content,
+                include_comments=False,
+                include_tables=False,
+                favor_recall=False,
+                no_fallback=False,
+                output="txt",
+                with_metadata=False,
+            )
+            if extracted and extracted.strip():
+                text = extracted
+            else:
+                raise ValueError("empty")
+        except Exception:
+            # Fallback: clean with BeautifulSoup and keep only main/article/body text
+            soup = BeautifulSoup(content, "html.parser")
+            for tag in soup(["script", "style", "noscript", "meta", "link", "svg", "img", "picture", "source"]):
+                tag.decompose()
+            for tag in soup(["header", "nav", "aside", "footer"]):
+                tag.decompose()
+            main_node = soup.find("article") or soup.find("main") or soup.body
+            text = main_node.get_text(" ") if main_node else soup.get_text(" ")
+
     text = unescape(text)
-    # Remove any residual angle-bracketed artifacts
-    text = re.sub(r"<[^>]+>", " ", text)
-    # Remove markdown image syntax ![alt](url)
+    # Remove common cookie/consent strings if they slipped through
+    text = re.sub(r"(?i)(we use cookies|cookie\s+settings|your\s+privacy|consent)", " ", text)
+    # Remove CSS/JS artifacts
+    text = re.sub(r"\{[^}]*\}", " ", text)  # CSS blocks
+    text = re.sub(r";\s*}", " ", text)
+    text = re.sub(r"\b(function|var|let|const|window\.|document\.)\b[\s\S]{0,120}", " ", text)
+    # Remove markdown image syntax and data URIs
     text = re.sub(r"!\[[^\]]*\]\([^\)]*\)", " ", text)
-    # Remove data URI references
     text = re.sub(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+", " ", text)
-    # Remove any stray 'javascript:' tokens
-    text = re.sub(r"javascript:\s*", "", text, flags=re.IGNORECASE)
     # Collapse whitespace
     text = re.sub(r"\s+", " ", text).strip()
     return text
