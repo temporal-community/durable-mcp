@@ -37,31 +37,52 @@ async def _elicit_topic(ctx: Context) -> str | None:
 async def _classify_with_sampling(ctx: Context, items: list[dict], buckets: List[str]) -> dict:
     """Ask the MCP client (via sampling) to classify items into the provided buckets.
 
-    Returns a dict in the shape {"categories": {bucket_label: [items...]}}.
+    Returns a dict in the shape {"categories": {bucket_label: [items...]}} with full original items.
     """
+    # Build an ID mapping and pass only minimal fields to the LLM
+    id_to_item: dict[str, dict] = {}
+    llm_items: list[dict] = []
+    for it in items:
+        story_id = str(it.get("id", ""))
+        if not story_id:
+            # Skip items without stable id
+            continue
+        id_to_item[story_id] = it
+        llm_items.append({
+            "id": story_id,
+            "title": it.get("title"),
+            "url": it.get("url"),
+        })
+
     instructions = {
-        "task": "Classify items into the given categories",
+        "task": "Classify item IDs into the given categories",
         "categories": buckets,
         "requirements": [
             "Return only JSON with keys: categories",
-            "categories must be an object mapping category label to an array of items",
-            "Each item in output must be one of the original items without modification",
-            "Every item should appear in exactly one category",
+            "categories must be an object mapping category label to an array of string IDs",
+            "Each returned ID must be from the provided items",
+            "Every item ID should appear in exactly one category",
             "Do not include markdown code fences",
         ],
-        "items": items,
+        "items": llm_items,
+        "output_format": {"categories": {"<bucket>": ["<id>"]}},
     }
 
-    # Single-message prompt that includes system-style guidance and the JSON payload
     prompt_text = (
         "You are a helpful assistant that strictly outputs valid JSON in the Output format specified. "
-        "Classify the provided Hacker News items into exactly the provided categories.\n\n"
+        "Classify the provided item IDs into exactly the provided categories.\n\n"
         f"INPUT:\n{json.dumps(instructions)}\n\n"
-        "OUTPUT FORMAT:\n{\n  \"categories\": { \"<bucket>\": [ <original items> ] }\n}\n"
+        "OUTPUT FORMAT:\n{\n  \"categories\": { \"<bucket>\": [ \"<id>\" ] }\n}\n"
     )
 
-    content = await ctx.sample("Please classify the following Hacker News items into the provided categories.", system_prompt=prompt_text, temperature=0.0, max_tokens=1200)
+    content = await ctx.sample(
+        "Please classify the following Hacker News item IDs into the provided categories.",
+        system_prompt=prompt_text,
+        temperature=0.0,
+        max_tokens=800,
+    )
     await ctx.info("Classification completed " + str(content))
+
     # Normalize to string; content may be a TextContent-like object
     if isinstance(content, str):
         text = content.strip()
@@ -98,9 +119,22 @@ async def _classify_with_sampling(ctx: Context, items: list[dict], buckets: List
         json_text = _extract_json(text) or "{}"
         parsed = json.loads(json_text)
 
-    categories = parsed.get("categories") if isinstance(parsed, dict) else None
-    if not isinstance(categories, dict):
-        categories = {label: [] for label in buckets}
+    raw_categories = parsed.get("categories") if isinstance(parsed, dict) else None
+    if not isinstance(raw_categories, dict):
+        raw_categories = {label: [] for label in buckets}
+
+    # Rehydrate full items by ID
+    categories: dict[str, list] = {}
+    for label in buckets:
+        ids = raw_categories.get(label, [])
+        full_items = []
+        for sid in ids:
+            sid_str = str(sid)
+            item = id_to_item.get(sid_str)
+            if item is not None:
+                full_items.append(item)
+        categories[label] = full_items
+
     return {"categories": categories}
 
 
