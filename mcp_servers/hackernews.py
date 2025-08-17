@@ -1,8 +1,12 @@
+import asyncio
 from temporalio.client import Client
 from fastmcp import FastMCP, Context
 from pydantic import BaseModel, Field
 from typing import List
 import json
+
+from workflows.workflows import GetLatestStories
+from shared.models import SummaryInput
 
 # Initialize FastMCP server
 mcp = FastMCP("hackernews")
@@ -34,7 +38,7 @@ async def _elicit_topic(ctx: Context) -> str | None:
         return None
 
 
-async def _classify_with_sampling(ctx: Context, items: list[dict], buckets: List[str]) -> dict:
+async def _summarize_with_sampling(ctx: Context, items: list[dict], buckets: List[str]) -> dict:
     """Ask the MCP client (via sampling) to classify items into the provided buckets.
 
     Returns a dict in the shape {"categories": {bucket_label: [items...]}} with full original items.
@@ -166,6 +170,8 @@ async def get_latest_stories(ctx: Context) -> str:
     # Use Update-With-Start to ensure we get a handle even if the workflow does not exist yet
     from temporalio.client import WithStartWorkflowOperation
     from temporalio.common import WorkflowIDConflictPolicy
+    # TODO: delete this
+    print("creating start_op")
     start_op = WithStartWorkflowOperation(
         "GetLatestStories",
         query,
@@ -173,38 +179,72 @@ async def get_latest_stories(ctx: Context) -> str:
         task_queue="hackernews-task-queue",
         id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING
     )
+    # TODO: delete this
+    print("start_op created")
     # Execute a no-op update that exists on the workflow to trigger start-if-needed
     await client.execute_update_with_start_workflow(
         update="ping",
         args=[],
         start_workflow_operation=start_op,
     )
+    # TODO: delete this
+    print("workflow started")
     # Retrieve a handle for future interactions and to get the result now
     handle = await start_op.workflow_handle()
-    raw_result = await handle.result()
+    # TODO: delete this
+    print("starting workflow")
+    # start the workflow running
+    handle.result()
+    final_result = None
+    while True:
+        # TODO: delete this
+        print("waiting for final result")
+
+        # First check if the final result is ready
+        # get the final result
+        final_result_ready = await handle.query(GetLatestStories.get_final_result_ready)
+        if final_result_ready:
+            final_result = await handle.query(GetLatestStories.get_final_result)
+            break
+
+        # Then check if the content preview is ready
+        content_preview = await handle.query(GetLatestStories.get_content_preview)
+        if content_preview:
+            # TODO: delete this
+            print("content previews ready for " + str(content_preview.keys()))
+
+            # for each content preview, supply the summary via workflow update
+            for story_id, preview in content_preview.items():
+                # supply content summary via workflow update
+                await handle.execute_update(GetLatestStories.update_story_summary, SummaryInput(story_id=story_id, summary="insert summary here"))
+
+
+
+        # wait for 10 seconds
+        await asyncio.sleep(10)
 
     # Parse workflow result (expected to be a JSON array of story objects)
     try:
-        stories: list[dict] = json.loads(raw_result)
+        stories: list[dict] = json.loads(final_result)
         if not isinstance(stories, list):
             raise ValueError("Expected a list of story objects")
     except Exception:
         return json.dumps({
             "error": "Workflow returned invalid JSON for stories",
-            "raw": raw_result,
+            "raw": final_result,
         })
 
     # Ask the MCP client (via sampling) to classify stories into the provided buckets
-    try:
-        classified = await _classify_with_sampling(ctx, stories, DEFAULT_BUCKETS)
-        return json.dumps(classified)
-    except Exception as e:
-        await ctx.info(f"Classification failed: {e}")
-        # Fallback: return unclassified structure
-        return json.dumps({
-            "categories": {label: [] for label in DEFAULT_BUCKETS},
-            "error": f"classification_failed: {e}",
-        })
+    # try:
+    #     classified = await _classify_with_sampling(ctx, stories, DEFAULT_BUCKETS)
+    #     return json.dumps(classified)
+    # except Exception as e:
+    #     await ctx.info(f"Classification failed: {e}")
+    #     # Fallback: return unclassified structure
+    #     return json.dumps({
+    #         "categories": {label: [] for label in DEFAULT_BUCKETS},
+    #         "error": f"classification_failed: {e}",
+    #     })
 
 if __name__ == "__main__":
     # Initialize and run the server
