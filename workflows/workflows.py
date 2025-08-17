@@ -123,48 +123,7 @@ class GetLatestStories:
         self.summary: dict[str, str] = {}
         self.stories: list[dict[str, str]] = []
         self.final_result_ready = False
-
-    @workflow.run
-    async def get_latest_stories(self, query: str | None = None) -> str:
-        """Get a summary of the top 100 newest stories on Hacker News using Algolia API.
-
-        Returns:
-            JSON string containing an array of the top 10 newest stories with their main fields.
-        """
-        # Pass a single dataclass instance to the activity
-        params = HackerNewsParams(query=query)
-
-        data = await workflow.execute_activity(
-            make_hackernews_request,
-            params,
-            schedule_to_close_timeout=timedelta(seconds=40),
-            retry_policy=retry_policy,
-        )
-
-        if not data or "hits" not in data:
-            return json.dumps({"error": "Failed to fetch stories from Algolia API"})
-
-        hits = data.get("hits", [])
-
-        # Extract the main fields from each story
-        for hit in hits:
-            story_summary = {
-                "id": hit.get("objectID"),
-                "title": hit.get("title"),
-                "url": hit.get("url"),
-                "points": hit.get("points"),
-                "author": hit.get("author"),
-                "created_at": hit.get("created_at"),
-                "num_comments": hit.get("num_comments"),
-                "story_text": hit.get("story_text"),
-            }
-            self.stories.append(story_summary)
-
-        # For each story that has a URL, fetch a short preview of its contents via activity
-        await self.retrieve_content_and_summarize(self.stories)
-
-        return json.dumps(self.stories, indent=2)
-
+        self.topic = None
 
     async def retrieve_content_and_summarize(self, stories: list[dict]) -> list[dict]:
         """For each story with a URL, fetch content and add a short preview.
@@ -210,6 +169,7 @@ class GetLatestStories:
                 await workflow.wait_condition(lambda: self.summary.get(story["id"]) is not None)
                 # received the summary for this story
                 story["summary"] = self.summary[story["id"]]
+                return
 
             except Exception as e:
                 # TODO: delete this
@@ -222,17 +182,84 @@ class GetLatestStories:
         tasks = [_process_story(story) for story in stories]
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        # TODO: delete this
+        print("the final result is ready")
         # set the final result to true
         self.final_result_ready = True
         return self.stories
 
-    @workflow.update
-    def ping(self) -> str:
-        """No-op update used for update-with-start to ensure a handle.
+    @workflow.run
+    async def get_latest_stories(self) -> str:
+        """Get a summary of the top 100 newest stories on Hacker News using Algolia API.
 
-        Returns a simple string without mutating workflow state.
+        Returns:
+            JSON string containing an array of the top 10 newest stories with their main fields
+            and a summary of the content.
         """
-        return "ok"
+
+        while True:
+
+            await workflow.wait_condition(
+                lambda: self.topic is not None
+                and self.final_result_ready is False
+            )
+
+            # Pass a single dataclass instance to the activity
+            params = HackerNewsParams(query=self.topic)
+            # TODO: delete this
+            print(f"getting stories for topic {self.topic}")
+
+            data = await workflow.execute_activity(
+                make_hackernews_request,
+                params,
+                schedule_to_close_timeout=timedelta(seconds=40),
+                retry_policy=retry_policy,
+            )
+
+            if not data or "hits" not in data:
+                return json.dumps({"error": "Failed to fetch stories from Algolia API"})
+
+            hits = data.get("hits", [])
+
+            # Extract the main fields from each story
+            for hit in hits:
+                story_summary = {
+                    "id": hit.get("objectID"),
+                    "title": hit.get("title"),
+                    "url": hit.get("url"),
+                    "points": hit.get("points"),
+                    "author": hit.get("author"),
+                    "created_at": hit.get("created_at"),
+                    "num_comments": hit.get("num_comments"),
+                    "story_text": hit.get("story_text"),
+                }
+                self.stories.append(story_summary)
+
+            # For each story that has a URL, fetch a short preview of its contents via activity
+            await self.retrieve_content_and_summarize(self.stories)
+
+        return json.dumps(self.stories, indent=2)
+
+
+
+    @workflow.update
+    def reset_final_result_ready(self) -> None:
+        """This resets some variables to start a new summary of new articles
+        """
+        self.final_result_ready = False
+        self.content_preview = {}
+        self.summary = {}
+        self.stories = []
+        return
+
+    @workflow.update
+    def set_topic(self, topic: str) -> None:
+        """Set the topic for the workflow.
+
+        Returns the mutated list for convenience.
+        """
+        self.topic = topic
+        return
     
     @workflow.update
     def update_story_summary(self, summary_input: SummaryInput) -> None:
@@ -274,5 +301,16 @@ class GetLatestStories:
 
         Returns a list of stories with their summaries.
         """
+
+        # TODO: delete this
+        print("returning the final result from the workflow")
         return self.stories
+    
+    @workflow.query
+    def get_topic(self) -> str:
+        """Get the topic for the workflow.
+
+        Returns the topic.
+        """
+        return self.topic
     
