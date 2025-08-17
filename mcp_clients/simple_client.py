@@ -82,9 +82,6 @@ class SimpleMCPClient:
         try:
             load_dotenv()
             model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-            print(f"🤖 Sampling using model: {model_name}")
-            print(f"🤖 Sampling using messages: {messages}")
-            print(f"🤖 Sampling using params: {params}")
 
             # Build OpenAI-compatible chat messages
             chat_messages: list[dict[str, str]] = []
@@ -130,7 +127,7 @@ class SimpleMCPClient:
                 temperature=0.0,
                 max_tokens=800,
             )
-            print(f"🤖 response: {response}")
+
             return response["choices"][0]["message"].get("content", "")
         except Exception as e:
             return f"Sampling failed: {e}"
@@ -355,7 +352,10 @@ async def handle_tool_selection_LLM_output(content: str, tool_name_to_client: di
         try:
             result = await client_for_tool.call_tool(tool_name, parameters)
             print("\n🔎 Tool result:")
-            print(result)
+            structured_content_result = result.structured_content.get("result")
+            parsed = json.loads(structured_content_result)
+            pretty_result = json.dumps(parsed, indent=4)
+            print(pretty_result)
         except Exception as e:
             print(f"❌ Tool invocation failed: {e}")
     else:

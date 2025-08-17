@@ -61,7 +61,7 @@ async def _summarize_with_sampling(ctx: Context, preview: str) -> str:
         temperature=0.0,
         max_tokens=800,
     )
-    await ctx.info("Summarization completed " + str(content))
+    # await ctx.info("Summarization completed " + str(content))
 
     # Normalize to string; content may be a TextContent-like object
     if isinstance(content, str):
@@ -78,7 +78,7 @@ async def _summarize_with_sampling(ctx: Context, preview: str) -> str:
             text = json.dumps(content)
     else:
         text = str(content)
-    await ctx.info("Summarization completed text = " + str(text))
+    # await ctx.info("Summarization completed text = " + str(text))
 
     return text
 
@@ -132,7 +132,7 @@ async def get_latest_stories(ctx: Context) -> str:
     topic = await handle.query(GetLatestStories.get_topic)
     if not topic:
         query = await _elicit_topic(ctx)
-        await ctx.info("Elicitation completed - topic: " + str(query) + "; starting workflow")
+        # await ctx.info("Elicitation completed - topic: " + str(query) + "; starting workflow")
         await handle.execute_update(GetLatestStories.set_topic, query)
 
     # This is a long running workflow - an entity workflow - so it will not
@@ -161,8 +161,6 @@ async def get_latest_stories(ctx: Context) -> str:
         # wait for 10 seconds
         await asyncio.sleep(10)
 
-    # TODO: delete this
-    awaitctx.info("final result: " + str(final_result))
     return json.dumps(final_result)
 
     # Parse workflow result (expected to be a JSON array of story objects)
