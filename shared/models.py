@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pydantic import BaseModel
 
 # Shared models used across workflows and activities
 
@@ -13,3 +14,9 @@ class HackerNewsParams:
     page: int = 0
     # Optional free-text query to filter results by topic/keyword
     query: str | None = None
+
+class SummaryInput(BaseModel):
+    """Input for initial user research query"""
+
+    story_id: str
+    summary: str

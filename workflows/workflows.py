@@ -3,6 +3,7 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 import json
 import asyncio
+from shared.models import SummaryInput
 
 retry_policy = RetryPolicy(
     maximum_attempts=0,  # Infinite retries
@@ -116,6 +117,13 @@ class GetForecast:
 
 @workflow.defn
 class GetLatestStories:
+
+    def __init__(self):
+        self.content_preview: dict[str, str] = {}
+        self.summary: dict[str, str] = {}
+        self.stories: list[dict[str, str]] = []
+        self.final_result_ready = False
+
     @workflow.run
     async def get_latest_stories(self, query: str | None = None) -> str:
         """Get a summary of the top 100 newest stories on Hacker News using Algolia API.
@@ -139,7 +147,6 @@ class GetLatestStories:
         hits = data.get("hits", [])
 
         # Extract the main fields from each story
-        stories = []
         for hit in hits:
             story_summary = {
                 "id": hit.get("objectID"),
@@ -151,12 +158,12 @@ class GetLatestStories:
                 "num_comments": hit.get("num_comments"),
                 "story_text": hit.get("story_text"),
             }
-            stories.append(story_summary)
+            self.stories.append(story_summary)
 
         # For each story that has a URL, fetch a short preview of its contents via activity
-        await self.retrieve_content_and_summarize(stories)
+        await self.retrieve_content_and_summarize(self.stories)
 
-        return json.dumps(stories, indent=2)
+        return json.dumps(self.stories, indent=2)
 
 
     async def retrieve_content_and_summarize(self, stories: list[dict]) -> list[dict]:
@@ -197,18 +204,35 @@ class GetLatestStories:
                 # Final fallback chain: story_text -> raw content -> empty string
                 if not isinstance(text_only, str) or not text_only.strip():
                     text_only = (story.get("story_text") or "").strip() or (content_source or "")
-                story["content_preview"] = text_only
-            except Exception:
+                # TODO: delete this
+                print(f"story: {story['id']}")
+                # add the text_only to the content_preview
+                self.content_preview[story["id"]] = text_only
+                # TODO: delete this
+                print(f"content preview added for story {story['id']}")
+                # wait for the summary to be ready (this will come through sampling (via workflow update))
+                await workflow.wait_condition(lambda: self.summary.get(story["id"]) is not None)
+                # TODO: delete this
+                print(f"summary received for story {story['id']}")
+                # received the summary for this story
+                story["summary"] = self.summary[story["id"]]
+                # TODO: delete this
+                print(f"story {story['id']} summary: {story['summary']}")
+                # remove the content_preview for this story
+            except Exception as e:
+                # TODO: delete this
+                print(f"error processing story {story['id']}: {e}")
                 # If fetching content fails, fallback to story_text if available
-                story["content_preview"] = (story.get("story_text") or "").strip()
+                story["summary"] = "Summary not available"
                 return
 
         # Kick off processing for all stories concurrently
         tasks = [_process_story(story) for story in stories]
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-
-        return stories
+        # set the final result to true
+        self.final_result_ready = True
+        return self.stories
 
     @workflow.update
     def ping(self) -> str:
@@ -217,3 +241,46 @@ class GetLatestStories:
         Returns a simple string without mutating workflow state.
         """
         return "ok"
+    
+    @workflow.update
+    def update_story_summary(self, summary_input: SummaryInput) -> None:
+        """Update the stories with the summary of the content.
+
+        Returns the mutated list for convenience.
+        """
+        story_id = summary_input.story_id
+        summary = summary_input.summary
+        # TODO: delete this
+        print(f"updating story {story_id} with summary {summary}")
+        # add the summary to the summary dictionary
+        self.summary[story_id] = summary
+        # remove the content_preview for this story
+        del self.content_preview[story_id]
+        # TODO: delete this
+        print(f"summary updated for story {story_id}")
+        return 
+    
+    @workflow.query
+    def get_content_preview(self) -> dict[str, str]:
+        """Get the content preview for all stories.
+
+        Returns a dictionary of story IDs to content previews.
+        """
+        return self.content_preview
+    
+    @workflow.query
+    def get_final_result_ready(self) -> bool:
+        """Get the final result ready flag.
+
+        Returns a boolean indicating if the final result is ready.
+        """
+        return self.final_result_ready
+    
+    @workflow.query
+    def get_final_result(self) -> list[dict]:
+        """Get the final result for all stories.
+
+        Returns a list of stories with their summaries.
+        """
+        return self.stories
+    
