@@ -38,54 +38,30 @@ async def _elicit_topic(ctx: Context) -> str | None:
         return None
 
 
-async def _summarize_with_sampling(ctx: Context, items: list[dict], buckets: List[str]) -> dict:
+async def _summarize_with_sampling(ctx: Context, preview: str) -> str:
     """Ask the MCP client (via sampling) to classify items into the provided buckets.
 
     Returns a dict in the shape {"categories": {bucket_label: [items...]}} with full original items.
     """
-    # Build an ID mapping and pass only minimal fields to the LLM
-    id_to_item: dict[str, dict] = {}
-    llm_items: list[dict] = []
-    for it in items:
-        story_id = str(it.get("id", ""))
-        if not story_id:
-            # Skip items without stable id
-            continue
-        id_to_item[story_id] = it
-        llm_items.append({
-            "id": story_id,
-            "title": it.get("title"),
-            "url": it.get("url"),
-        })
 
-    instructions = {
-        "task": "Classify item IDs into the given categories",
-        "categories": buckets,
-        "requirements": [
-            "Return only JSON with keys: categories",
-            "categories must be an object mapping category label to an array of string IDs",
-            "Each returned ID must be from the provided items",
-            "Every item ID should appear in exactly one category",
-            "Do not include markdown code fences",
-        ],
-        "items": llm_items,
-        "output_format": {"categories": {"<bucket>": ["<id>"]}},
-    }
-
-    prompt_text = (
-        "You are a helpful assistant that strictly outputs valid JSON in the Output format specified. "
-        "Classify the provided item IDs into exactly the provided categories.\n\n"
-        f"INPUT:\n{json.dumps(instructions)}\n\n"
-        "OUTPUT FORMAT:\n{\n  \"categories\": { \"<bucket>\": [ \"<id>\" ] }\n}\n"
-    )
+    instructions = """You are a helpful assistant that summarizes Hacker News stories.
+    You will be given a preview of a Hacker News story.
+    Please summarize the story in a few sentences.
+    Do not include markdown code fences.
+    Do not include any other text than the summary.
+    The summary should be in the same language as the story.
+    The summary should be concise and to the point.
+    
+    The preview is: """ + preview
+    
 
     content = await ctx.sample(
-        "Please classify the following Hacker News item IDs into the provided categories.",
-        system_prompt=prompt_text,
+        "Please summarize the following Hacker News story:",
+        system_prompt=instructions,
         temperature=0.0,
         max_tokens=800,
     )
-    await ctx.info("Classification completed " + str(content))
+    await ctx.info("Summarization completed " + str(content))
 
     # Normalize to string; content may be a TextContent-like object
     if isinstance(content, str):
@@ -102,44 +78,9 @@ async def _summarize_with_sampling(ctx: Context, items: list[dict], buckets: Lis
             text = json.dumps(content)
     else:
         text = str(content)
-    await ctx.info("Classification completed text = " + str(text))
+    await ctx.info("Summarization completed text = " + str(text))
 
-    # Try strict JSON parsing; if it fails, attempt to extract a JSON object
-    def _extract_json(text_in: str) -> str | None:
-        t = text_in.strip()
-        if t.startswith("```"):
-            lines = [ln for ln in t.splitlines() if not ln.strip().startswith("```")]
-            t = "\n".join(lines).strip()
-        try:
-            start = t.index("{")
-            end = t.rindex("}") + 1
-            return t[start:end]
-        except ValueError:
-            return None
-
-    try:
-        parsed = json.loads(text)
-    except Exception:
-        json_text = _extract_json(text) or "{}"
-        parsed = json.loads(json_text)
-
-    raw_categories = parsed.get("categories") if isinstance(parsed, dict) else None
-    if not isinstance(raw_categories, dict):
-        raw_categories = {label: [] for label in buckets}
-
-    # Rehydrate full items by ID
-    categories: dict[str, list] = {}
-    for label in buckets:
-        ids = raw_categories.get(label, [])
-        full_items = []
-        for sid in ids:
-            sid_str = str(sid)
-            item = id_to_item.get(sid_str)
-            if item is not None:
-                full_items.append(item)
-        categories[label] = full_items
-
-    return {"categories": categories}
+    return text
 
 
 DEFAULT_BUCKETS: List[str] = [
@@ -212,11 +153,12 @@ async def get_latest_stories(ctx: Context) -> str:
         if content_preview:
             # TODO: delete this
             print("content previews ready for " + str(content_preview.keys()))
-
             # for each content preview, supply the summary via workflow update
             for story_id, preview in content_preview.items():
+                # get the summary for this story via MCP sampling
+                summary = await _summarize_with_sampling(ctx, preview)
                 # supply content summary via workflow update
-                await handle.execute_update(GetLatestStories.update_story_summary, SummaryInput(story_id=story_id, summary="insert summary here"))
+                await handle.execute_update(GetLatestStories.update_story_summary, SummaryInput(story_id=story_id, summary=summary))
 
 
 

@@ -204,21 +204,13 @@ class GetLatestStories:
                 # Final fallback chain: story_text -> raw content -> empty string
                 if not isinstance(text_only, str) or not text_only.strip():
                     text_only = (story.get("story_text") or "").strip() or (content_source or "")
-                # TODO: delete this
-                print(f"story: {story['id']}")
                 # add the text_only to the content_preview
                 self.content_preview[story["id"]] = text_only
-                # TODO: delete this
-                print(f"content preview added for story {story['id']}")
                 # wait for the summary to be ready (this will come through sampling (via workflow update))
                 await workflow.wait_condition(lambda: self.summary.get(story["id"]) is not None)
-                # TODO: delete this
-                print(f"summary received for story {story['id']}")
                 # received the summary for this story
                 story["summary"] = self.summary[story["id"]]
-                # TODO: delete this
-                print(f"story {story['id']} summary: {story['summary']}")
-                # remove the content_preview for this story
+
             except Exception as e:
                 # TODO: delete this
                 print(f"error processing story {story['id']}: {e}")
