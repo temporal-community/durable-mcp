@@ -97,49 +97,49 @@ async def get_latest_stories(ctx: Context) -> str:
     """Get newest Hacker News stories, then classify them into 5 buckets using sampling.
 
     Returns:
-        JSON string: {"categories": {"<bucket>": [items...]}}
+        JSON string: {"stories": [story_id, story_title, story_url, story_summary]}
     """
 
     
-
-    # Elicit topic/keyword from the user
-    query = await _elicit_topic(ctx)
-    await ctx.info("Elicitation completed - topic: " + str(query) + "; starting workflow")
-
     # The business logic has been moved into the temporal workflow; start via update-with-start
     client = await get_temporal_client()
     # Use Update-With-Start to ensure we get a handle even if the workflow does not exist yet
     from temporalio.client import WithStartWorkflowOperation
     from temporalio.common import WorkflowIDConflictPolicy
-    # TODO: delete this
-    print("creating start_op")
+
     start_op = WithStartWorkflowOperation(
         "GetLatestStories",
-        query,
         id="hackernews-latest-stories",
         task_queue="hackernews-task-queue",
         id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING
     )
-    # TODO: delete this
-    print("start_op created")
+
     # Execute a no-op update that exists on the workflow to trigger start-if-needed
     await client.execute_update_with_start_workflow(
-        update="ping",
+        update="reset_final_result_ready",
         args=[],
         start_workflow_operation=start_op,
     )
-    # TODO: delete this
-    print("workflow started")
+
     # Retrieve a handle for future interactions and to get the result now
     handle = await start_op.workflow_handle()
-    # TODO: delete this
-    print("starting workflow")
+
     # start the workflow running
     handle.result()
     final_result = None
+
+    # First, if there isn't already a topic, elicit topic/keyword from the user
+    topic = await handle.query(GetLatestStories.get_topic)
+    if not topic:
+        query = await _elicit_topic(ctx)
+        await ctx.info("Elicitation completed - topic: " + str(query) + "; starting workflow")
+        await handle.execute_update(GetLatestStories.set_topic, query)
+
+    # This is a long running workflow - an entity workflow - so it will not
+    # exit. So we will loop until the final result is ready. When it is, the
+    # client will exit, but the workflow will continue running.
+    # We can run the client again and it will NOT start a new workflow, but it will 
     while True:
-        # TODO: delete this
-        print("waiting for final result")
 
         # First check if the final result is ready
         # get the final result
@@ -151,8 +151,6 @@ async def get_latest_stories(ctx: Context) -> str:
         # Then check if the content preview is ready
         content_preview = await handle.query(GetLatestStories.get_content_preview)
         if content_preview:
-            # TODO: delete this
-            print("content previews ready for " + str(content_preview.keys()))
             # for each content preview, supply the summary via workflow update
             for story_id, preview in content_preview.items():
                 # get the summary for this story via MCP sampling
@@ -160,21 +158,23 @@ async def get_latest_stories(ctx: Context) -> str:
                 # supply content summary via workflow update
                 await handle.execute_update(GetLatestStories.update_story_summary, SummaryInput(story_id=story_id, summary=summary))
 
-
-
         # wait for 10 seconds
         await asyncio.sleep(10)
 
+    # TODO: delete this
+    awaitctx.info("final result: " + str(final_result))
+    return json.dumps(final_result)
+
     # Parse workflow result (expected to be a JSON array of story objects)
-    try:
-        stories: list[dict] = json.loads(final_result)
-        if not isinstance(stories, list):
-            raise ValueError("Expected a list of story objects")
-    except Exception:
-        return json.dumps({
-            "error": "Workflow returned invalid JSON for stories",
-            "raw": final_result,
-        })
+    # try:
+    #     stories: list[dict] = json.loads(final_result)
+    #     if not isinstance(stories, list):
+    #         raise ValueError("Expected a list of story objects")
+    # except Exception:
+    #     return json.dumps({
+    #         "error": "Workflow returned invalid JSON for stories",
+    #         "raw": final_result,
+    #     })
 
     # Ask the MCP client (via sampling) to classify stories into the provided buckets
     # try:
