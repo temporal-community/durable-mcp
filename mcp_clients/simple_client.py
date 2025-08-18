@@ -13,6 +13,7 @@ from fastmcp import Client
 from fastmcp.client.logging import LogMessage
 from dotenv import load_dotenv
 from litellm import acompletion, litellm
+from temporalio.client import Client as TemporalClient
 
 
 class SimpleMCPClient:
@@ -392,6 +393,21 @@ async def prompt_user_and_invoke_llm() -> None:
         content = response["choices"][0]["message"].get("content", "").strip()
 
         await handle_tool_selection_LLM_output(content, tool_name_to_client)
+
+        # Start the ambient agent workflow (idempotent-ish: ignore if already running)
+        try:
+            temporal = await TemporalClient.connect("localhost:7233")
+            # Will raise if a workflow with the same ID is already running; we just ignore in that case
+            await temporal.start_workflow(
+                workflow="AmbientNewsAgent",
+                args=[],
+                id="ambient-news-agent",
+                task_queue="hackernews-task-queue",
+            )
+            print("🛰️  AmbientNewsAgent workflow started (id=ambient-news-agent)")
+        except Exception as e:
+            # Likely already started; log and continue
+            print(f"ℹ️ AmbientNewsAgent not started (possibly already running): {e}")
 
     except Exception as e:
         print(f"❌ LLM invocation failed: {e}")
