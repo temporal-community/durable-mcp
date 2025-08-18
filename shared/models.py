@@ -4,6 +4,7 @@ from pydantic import BaseModel
 # Shared models used across workflows and activities
 
 ALGOLIA_URL_DEFAULT = "https://hn.algolia.com/api/v1/search_by_date"
+WORKFLOW_ID = "hackernews-latest-stories"
 
 @dataclass
 class HackerNewsParams:
@@ -20,3 +21,14 @@ class SummaryInput(BaseModel):
 
     story_id: str
     summary: str
+
+class PDFInput(BaseModel):
+    """Input for PDF generation"""
+
+    markdown_content: str
+    title: str = "Hacker News Latest Stories"
+
+class MDInput(BaseModel):
+    """Input for markdown generation"""
+
+    json_content: str

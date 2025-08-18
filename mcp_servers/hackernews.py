@@ -6,7 +6,7 @@ from typing import List
 import json
 
 from workflows.workflows import GetLatestStories
-from shared.models import SummaryInput
+from shared.models import SummaryInput, WORKFLOW_ID
 
 # Initialize FastMCP server
 mcp = FastMCP("hackernews")
@@ -109,7 +109,7 @@ async def get_latest_stories(ctx: Context) -> str:
 
     start_op = WithStartWorkflowOperation(
         "GetLatestStories",
-        id="hackernews-latest-stories",
+        id=WORKFLOW_ID,
         task_queue="hackernews-task-queue",
         id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING
     )
@@ -162,29 +162,6 @@ async def get_latest_stories(ctx: Context) -> str:
         await asyncio.sleep(10)
 
     return json.dumps(final_result)
-
-    # Parse workflow result (expected to be a JSON array of story objects)
-    # try:
-    #     stories: list[dict] = json.loads(final_result)
-    #     if not isinstance(stories, list):
-    #         raise ValueError("Expected a list of story objects")
-    # except Exception:
-    #     return json.dumps({
-    #         "error": "Workflow returned invalid JSON for stories",
-    #         "raw": final_result,
-    #     })
-
-    # Ask the MCP client (via sampling) to classify stories into the provided buckets
-    # try:
-    #     classified = await _classify_with_sampling(ctx, stories, DEFAULT_BUCKETS)
-    #     return json.dumps(classified)
-    # except Exception as e:
-    #     await ctx.info(f"Classification failed: {e}")
-    #     # Fallback: return unclassified structure
-    #     return json.dumps({
-    #         "categories": {label: [] for label in DEFAULT_BUCKETS},
-    #         "error": f"classification_failed: {e}",
-    #     })
 
 if __name__ == "__main__":
     # Initialize and run the server
