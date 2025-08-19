@@ -13,6 +13,7 @@ class HackerNewsParams:
     numeric_filters: str = "points>0"
     hits_per_page: int = 5
     page: int = 0
+    restrictSearchableAttributes: str = "title,url"
     # Optional free-text query to filter results by topic/keyword
     query: str | None = None
 

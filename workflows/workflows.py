@@ -175,18 +175,37 @@ class GetLatestStories:
                 # TODO: delete this
                 print(f"error processing story {story['id']}: {e}")
                 # If fetching content fails, fallback to story_text if available
-                story["summary"] = "Summary not available"
+                story["summary"] = "Summary not available - unable to scrape content"
                 return
 
         # Kick off processing for all stories concurrently
         tasks = [_process_story(story) for story in stories]
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        # TODO: delete this
-        print("the final result is ready")
         # set the final result to true
         self.final_result_ready = True
         return self.stories
+
+    def _parse_hits_into_stories(self, data: dict) -> list[dict]:
+        """Extract story summaries from Algolia API response data.
+
+        Returns a list of story dicts with the main fields we care about.
+        """
+        hits = data.get("hits", [])
+        stories: list[dict] = []
+        for hit in hits:
+            story_summary = {
+                "id": hit.get("objectID"),
+                "title": hit.get("title"),
+                "url": hit.get("url"),
+                "points": hit.get("points"),
+                "author": hit.get("author"),
+                "created_at": hit.get("created_at"),
+                "num_comments": hit.get("num_comments"),
+                "story_text": hit.get("story_text"),
+            }
+            stories.append(story_summary)
+        return stories
 
     @workflow.run
     async def get_latest_stories(self) -> str:
@@ -219,23 +238,11 @@ class GetLatestStories:
             if not data or "hits" not in data:
                 return json.dumps({"error": "Failed to fetch stories from Algolia API"})
 
-            hits = data.get("hits", [])
+            parsed_stories = self._parse_hits_into_stories(data)
+            self.stories.extend(parsed_stories)
 
-            # Extract the main fields from each story
-            for hit in hits:
-                story_summary = {
-                    "id": hit.get("objectID"),
-                    "title": hit.get("title"),
-                    "url": hit.get("url"),
-                    "points": hit.get("points"),
-                    "author": hit.get("author"),
-                    "created_at": hit.get("created_at"),
-                    "num_comments": hit.get("num_comments"),
-                    "story_text": hit.get("story_text"),
-                }
-                self.stories.append(story_summary)
-
-            # For each story that has a URL, fetch a short preview of its contents via activity
+            # For each story that has a URL, fetch a short preview of its contents via 
+            # activity. This will also wait for the summary to be ready for each story.
             await self.retrieve_content_and_summarize(self.stories)
 
         return json.dumps(self.stories, indent=2)
@@ -269,14 +276,12 @@ class GetLatestStories:
         """
         story_id = summary_input.story_id
         summary = summary_input.summary
-        # TODO: delete this
-        print(f"updating story {story_id} with summary {summary}")
+
         # add the summary to the summary dictionary
         self.summary[story_id] = summary
         # remove the content_preview for this story
         del self.content_preview[story_id]
-        # TODO: delete this
-        print(f"summary updated for story {story_id}")
+
         return 
     
     @workflow.query
