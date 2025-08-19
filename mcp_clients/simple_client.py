@@ -40,6 +40,7 @@ class SimpleMCPClient:
 
         # litellm._turn_on_debug()
         
+    # Basic MCP client methods
     async def connect(self):
         """Connect to the MCP server."""
         try:
@@ -49,9 +50,60 @@ class SimpleMCPClient:
         except Exception as e:
             print(f"❌ Failed to connect to {self.server_name} server: {e}")
             raise
+    async def list_tools(self):
+        """List all available tools from the server."""
+        try:
+            tools = await self.client.list_tools()
+            print(f"🔧 Available tools from {self.server_name}:")
+            for tool in tools:
+                name = tool.get("name") if isinstance(tool, dict) else getattr(tool, "name", str(tool))
+                desc = tool.get("description") if isinstance(tool, dict) else getattr(tool, "description", "No description")
+                print(f"  - {name}: {desc}")
+            return tools
+        except Exception as e:
+            print(f"❌ Failed to list tools from {self.server_name}: {e}")
+            return []
+    
+    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]):
+        """Call a specific tool on the server."""
+        try:
+            result = await self.client.call_tool(tool_name, arguments)
+            print(f"✅ Successfully called {tool_name} on {self.server_name}")
+            return result
+        except Exception as e:
+            print(f"❌ Failed to call {tool_name} on {self.server_name}: {e}")
+            raise
+    
+    async def get_weather(self, latitude: float, longitude: float):
+        """Get weather forecast for a location."""
+        return await self.call_tool("get_forecast", {"latitude": latitude, "longitude": longitude})
+    
+    async def get_alerts(self, state: str):
+        """Get weather alerts for a US state."""
+        return await self.call_tool("get_alerts", {"state": state})
+    
+    async def get_news(self):
+        """Get newest HackerNews stories summary."""
+        return await self.call_tool("get_latest_stories", {})
+    
+    async def disconnect(self):
+        """Disconnect from the MCP server."""
+        try:
+            if self._entered:
+                await self.client.__aexit__(None, None, None)
+                self._entered = False
+            print(f"🔌 Disconnected from {self.server_name} server")
+        except Exception as e:
+            print(f"❌ Error disconnecting from {self.server_name}: {e}")
 
+    # MCP client methods for handling elicitation, logging, and sampling
     async def _handle_elicitation(self, message: str, response_type: type, params, context):
         print(f"🔍 Handling elicitation for {self.server_name}: {message}")
+        # In this simple example, we just ask for input from the command line.
+        # Remember, this is part of the MCP client and you have to figure out
+        # How the application communicates with the MCP client is up to you.
+        # This is a simple example and you have to figure out how to handle this
+        # in your application.
         user_input = input(f"{message}: ")
         # Try to construct using the first field name (works for single-field schemas like TopicSchema)
         try:
@@ -64,7 +116,6 @@ class SimpleMCPClient:
                 field_name = "value"
         response_data = response_type(**{field_name: user_input})
         return response_data
-
 
     async def _handle_log(self, message: LogMessage):
         level = getattr(message, "level", "info")
@@ -122,6 +173,8 @@ class SimpleMCPClient:
                     text = str(content_obj) if content_obj is not None else ""
                 chat_messages.append({"role": role, "content": str(text)})
 
+            # Invoke the LLM via LiteLLM
+            print(f"🧠 Invoking {model_name} from MCP server sampling")
             response = await acompletion(
                 model=model_name,
                 messages=chat_messages,
@@ -133,52 +186,6 @@ class SimpleMCPClient:
         except Exception as e:
             return f"Sampling failed: {e}"
     
-    async def list_tools(self):
-        """List all available tools from the server."""
-        try:
-            tools = await self.client.list_tools()
-            print(f"🔧 Available tools from {self.server_name}:")
-            for tool in tools:
-                name = tool.get("name") if isinstance(tool, dict) else getattr(tool, "name", str(tool))
-                desc = tool.get("description") if isinstance(tool, dict) else getattr(tool, "description", "No description")
-                print(f"  - {name}: {desc}")
-            return tools
-        except Exception as e:
-            print(f"❌ Failed to list tools from {self.server_name}: {e}")
-            return []
-    
-    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]):
-        """Call a specific tool on the server."""
-        try:
-            result = await self.client.call_tool(tool_name, arguments)
-            print(f"✅ Successfully called {tool_name} on {self.server_name}")
-            return result
-        except Exception as e:
-            print(f"❌ Failed to call {tool_name} on {self.server_name}: {e}")
-            raise
-    
-    async def get_weather(self, latitude: float, longitude: float):
-        """Get weather forecast for a location."""
-        return await self.call_tool("get_forecast", {"latitude": latitude, "longitude": longitude})
-    
-    async def get_alerts(self, state: str):
-        """Get weather alerts for a US state."""
-        return await self.call_tool("get_alerts", {"state": state})
-    
-    async def get_news(self):
-        """Get newest HackerNews stories summary."""
-        return await self.call_tool("get_latest_stories", {})
-    
-    async def disconnect(self):
-        """Disconnect from the MCP server."""
-        try:
-            if self._entered:
-                await self.client.__aexit__(None, None, None)
-                self._entered = False
-            print(f"🔌 Disconnected from {self.server_name} server")
-        except Exception as e:
-            print(f"❌ Error disconnecting from {self.server_name}: {e}")
-
 
 async def demo_weather_client():
     """Demonstrate the weather MCP client."""
@@ -377,8 +384,12 @@ async def prompt_user_and_invoke_llm() -> None:
             print("No input provided. Skipping LLM call.")
             return
 
+        # Setup the tool selection system prompt and the tool name to client mapping
+        # This system prompt carries a payload that describes the available tools and 
+        # their input schemas to the LLM.
         system_prompt, tool_name_to_client, clients = await setup_tool_selection()
 
+        # Send the user prompt to the LLM to decide which MCP tool to call (if any)
         model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         print(f"🤖 Querying {model_name} for tool selection...")
         response = await acompletion(
@@ -392,22 +403,9 @@ async def prompt_user_and_invoke_llm() -> None:
         )
         content = response["choices"][0]["message"].get("content", "").strip()
 
+        # Handle the LLM output: parse tool call JSON and invoke the tool or print response.
         await handle_tool_selection_LLM_output(content, tool_name_to_client)
 
-        # Start the ambient agent workflow (idempotent-ish: ignore if already running)
-        try:
-            temporal = await TemporalClient.connect("localhost:7233")
-            # Will raise if a workflow with the same ID is already running; we just ignore in that case
-            await temporal.start_workflow(
-                workflow="AmbientNewsAgent",
-                args=[],
-                id="ambient-news-agent",
-                task_queue="hackernews-task-queue",
-            )
-            print("🛰️  AmbientNewsAgent workflow started (id=ambient-news-agent)")
-        except Exception as e:
-            # Likely already started; log and continue
-            print(f"ℹ️ AmbientNewsAgent not started (possibly already running): {e}")
 
     except Exception as e:
         print(f"❌ LLM invocation failed: {e}")
@@ -431,8 +429,27 @@ async def main():
     # Run news demo
     # await demo_news_client()
     
-    # After demos, prompt the user and invoke an LLM via LiteLLM/OpenAI
+    # Demo LLM tool selection and tool invocation
     await prompt_user_and_invoke_llm()
+
+    # sleep for 5 minutes
+    await asyncio.sleep(300)
+
+    # Start the ambient agent workflow (idempotent-ish: ignore if already running)
+    try:
+        temporal = await TemporalClient.connect("localhost:7233")
+        # Will raise if a workflow with the same ID is already running; we just ignore in that case
+        await temporal.start_workflow(
+            workflow="AmbientNewsAgent",
+            args=[],
+            id="ambient-news-agent",
+            task_queue="hackernews-task-queue",
+        )
+        print("🛰️  AmbientNewsAgent workflow started (id=ambient-news-agent)")
+    except Exception as e:
+        # Likely already started; log and continue
+        print(f"ℹ️ AmbientNewsAgent not started (possibly already running): {e}")
+
 
     print("\n✅ All demos completed!")
 

@@ -34,6 +34,7 @@ async def make_hackernews_request(params: HackerNewsParams) -> dict[str, Any] | 
         "numericFilters": params.numeric_filters,
         "hitsPerPage": params.hits_per_page,
         "page": params.page,
+        "restrictSearchableAttributes": params.restrictSearchableAttributes,
     }
     # Include free-text query if provided
     if params.query:
@@ -43,6 +44,11 @@ async def make_hackernews_request(params: HackerNewsParams) -> dict[str, Any] | 
         "User-Agent": "hackernews-app/1.0",
         "Accept": "application/json",
     }
+
+    # TODO: delete this
+    print(f"making hackernews request with params: {api_params}")
+    print(f"url: {params.url}")
+    print(f"headers: {headers}")
 
     async with httpx.AsyncClient() as client:
         response = await client.get(

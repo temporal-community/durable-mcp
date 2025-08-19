@@ -27,7 +27,8 @@ async def call_mcp_tool(tool_name: str) -> Any:
             pass
 
 # The following activity is used to convert the JSON output of the MCP tool to markdown.
-# It was heavily vibe coded so it surely not optimal.
+# It was heavily vibe coded and only parses the format we are expecting.
+# IOW, it's far from a general purpose JSON to markdown converter.
 @activity.defn
 async def convert_json_to_markdown(json_text: str) -> str:
     """Convert the specific Hacker News stories JSON format into markdown.
@@ -81,19 +82,21 @@ async def convert_json_to_markdown(json_text: str) -> str:
 
             title = _safe_str(item.get("title"), "Untitled")
             author = _safe_str(item.get("author"), "unknown")
-            id = _safe_str(item.get("created_at"), "unknown")
+            id = _safe_str(item.get("id"), "unknown")
             created_at = _safe_str(item.get("created_at"), "unknown")
             num_comments = _safe_str(item.get("num_comments"), "unknown")
             points = _safe_str(item.get("points"), "unknown")
             summary = _safe_str(item.get("summary"), "unknown")
+            url = _safe_str(item.get("url"), "unknown")
 
             lines.append(f"- **Title**: {title}")
+            lines.append(f"    - **summary**: {summary}")
             lines.append(f"    - **author**: {author}")
+            lines.append(f"    - **url**: {url}")
             lines.append(f"    - **created_at**: {created_at}")
             lines.append(f"    - **id**: {id}")
             lines.append(f"    - **num_comments**: {num_comments}")
             lines.append(f"    - **points**: {points}")
-            lines.append(f"    - **summary**: {summary}")
             lines.append("")  # blank line between stories
 
         # Join lines and strip to avoid leading/trailing whitespace or blank lines

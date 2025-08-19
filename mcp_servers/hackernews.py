@@ -83,15 +83,6 @@ async def _summarize_with_sampling(ctx: Context, preview: str) -> str:
     return text
 
 
-DEFAULT_BUCKETS: List[str] = [
-    "Model Context Protocol (MCP)",
-    "Agents",
-    "Context Engineering",
-    "Ambient AI",
-    "Other",
-]
-
-
 @mcp.tool
 async def get_latest_stories(ctx: Context) -> str:
     """Get newest Hacker News stories, then classify them into 5 buckets using sampling.
