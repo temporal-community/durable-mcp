@@ -4,8 +4,8 @@ import asyncio
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from workflows.workflows import GetAlerts, GetForecast
-from workflows.activities import make_nws_request
+from workflows.weather_workflows import GetAlerts, GetForecast
+from workflows.weather_activities import make_nws_request
 
 async def main():
     # Connect to Temporal server (change address if using Temporal Cloud)

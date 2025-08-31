@@ -4,9 +4,9 @@ import asyncio
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from workflows.workflows import GetLatestStories
+from workflows.hackernews_workflows import GetLatestStories
 from workflows.agent_workflows import AmbientNewsAgent
-from workflows.activities import make_hackernews_request, fetch_url_content, render_url_content
+from workflows.hackernews_activities import make_hackernews_request, fetch_url_content, render_url_content
 from workflows.agent_activities import call_mcp_tool, convert_json_to_markdown
 from workflows.pdf_generation_activity import generate_pdf
 

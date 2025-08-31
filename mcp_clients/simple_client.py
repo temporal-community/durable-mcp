@@ -12,7 +12,7 @@ from typing import Dict, Any
 from fastmcp import Client
 from fastmcp.client.logging import LogMessage
 from dotenv import load_dotenv
-from litellm import acompletion, litellm
+from litellm import acompletion
 from temporalio.client import Client as TemporalClient
 
 
