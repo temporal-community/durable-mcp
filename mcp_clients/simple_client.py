@@ -432,23 +432,26 @@ async def main():
     # Demo LLM tool selection and tool invocation
     await prompt_user_and_invoke_llm()
 
-    # sleep for 5 minutes
-    await asyncio.sleep(300)
+    # Bonus demo: run the ambient agent workflow - uncomment this to run
+    # The intuition is that once the user has asked for a summary, we will 
+    # implicitly deliver updates on some cadence.
+    # # sleep for 5 minutes - this is here just to help with demo flow.
+    # await asyncio.sleep(300)
 
-    # Start the ambient agent workflow (idempotent-ish: ignore if already running)
-    try:
-        temporal = await TemporalClient.connect("localhost:7233")
-        # Will raise if a workflow with the same ID is already running; we just ignore in that case
-        await temporal.start_workflow(
-            workflow="AmbientNewsAgent",
-            args=[],
-            id="ambient-news-agent",
-            task_queue="hackernews-task-queue",
-        )
-        print("🛰️  AmbientNewsAgent workflow started (id=ambient-news-agent)")
-    except Exception as e:
-        # Likely already started; log and continue
-        print(f"ℹ️ AmbientNewsAgent not started (possibly already running): {e}")
+    # # Start the ambient agent workflow (idempotent-ish: ignore if already running)
+    # try:
+    #     temporal = await TemporalClient.connect("localhost:7233")
+    #     # Will raise if a workflow with the same ID is already running; we just ignore in that case
+    #     await temporal.start_workflow(
+    #         workflow="AmbientNewsAgent",
+    #         args=[],
+    #         id="ambient-news-agent",
+    #         task_queue="hackernews-task-queue",
+    #     )
+    #     print("🛰️  AmbientNewsAgent workflow started (id=ambient-news-agent)")
+    # except Exception as e:
+    #     # Likely already started; log and continue
+    #     print(f"ℹ️ AmbientNewsAgent not started (possibly already running): {e}")
 
 
     print("\n✅ All demos completed!")
