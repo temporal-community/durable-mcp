@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from typing import List
 import json
 
-from workflows.workflows import GetLatestStories
+from workflows.hackernews_workflows import GetLatestStories
 from shared.models import SummaryInput, WORKFLOW_ID
 
 # Initialize FastMCP server

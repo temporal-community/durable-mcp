@@ -63,6 +63,12 @@ Restart Claude Desktop if already running. Verify that the MCP server is availab
 
 ## Running the MCP server
 
+The MCP protocol handler will be started by Claude for Desktop. You must also start the Temporal worker (which will run the workflow and actvities).
+
+```
+uv run run_weather_worker.py
+```
+
 You can now ask Claude for the weather for a particular location. For example: `What is the weather in Honolulu, HI?`
 
 Claude will ask you for confirmation before it invokes the weather MCP server.
