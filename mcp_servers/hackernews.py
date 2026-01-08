@@ -156,4 +156,4 @@ async def get_latest_stories(ctx: Context) -> str:
 
 if __name__ == "__main__":
     # Initialize and run the server
-    mcp.run(transport='stdio')
+    mcp.run(transport='stdio', show_banner=False)

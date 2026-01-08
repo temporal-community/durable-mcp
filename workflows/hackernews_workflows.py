@@ -3,7 +3,7 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 import json
 import asyncio
-from shared.models import SummaryInput
+# from shared.models import SummaryInput
 
 retry_policy = RetryPolicy(
     maximum_attempts=0,  # Infinite retries
@@ -14,7 +14,7 @@ retry_policy = RetryPolicy(
 # Import activities and models, passing them through the sandbox
 with workflow.unsafe.imports_passed_through():
     from workflows.hackernews_activities import make_hackernews_request, fetch_url_content, render_url_content
-    from shared.models import HackerNewsParams
+    from shared.models import HackerNewsParams, SummaryInput
     # Import scraping helper that relies on non-sandbox libraries
     from workflows.scraping import html_to_text
 

@@ -116,7 +116,7 @@ To enable the firewall
 sudo pfctl -e
 ```
 
-To enable the firewall
+To disable the firewall
 ```
 sudo pfctl -d
 ```

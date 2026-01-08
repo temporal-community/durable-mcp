@@ -14,8 +14,9 @@ async def make_nws_request(url: str) -> dict[str, Any] | None:
         "User-Agent": USER_AGENT,
         "Accept": "application/geo+json"
     }
+
     async with httpx.AsyncClient() as client:
 
-        response = await client.get(url, headers=headers, timeout=5.0)
+        response = await client.get(url, headers=headers, timeout=30.0)
         response.raise_for_status()
         return response.json()

@@ -48,7 +48,7 @@ class GetAlerts:
         data = await workflow.execute_activity(
             make_nws_request,
             url,
-            schedule_to_close_timeout=timedelta(seconds=40),
+            start_to_close_timeout=timedelta(seconds=40),
             retry_policy=retry_policy,
         )
 
@@ -77,7 +77,7 @@ class GetForecast:
         points_data = await workflow.execute_activity(
             make_nws_request,
             points_url,
-            schedule_to_close_timeout=timedelta(seconds=40),
+            start_to_close_timeout=timedelta(seconds=40),
             retry_policy=retry_policy,
         )
 
@@ -91,7 +91,7 @@ class GetForecast:
         forecast_data = await workflow.execute_activity(
             make_nws_request,
             forecast_url,
-            schedule_to_close_timeout=timedelta(seconds=40),
+            start_to_close_timeout=timedelta(seconds=40),
             retry_policy=retry_policy,
         )
         if not forecast_data:
