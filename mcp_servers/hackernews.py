@@ -83,6 +83,57 @@ async def _summarize_with_sampling(ctx: Context, preview: str) -> str:
     return text
 
 
+async def _process_previews(
+    ctx: Context,
+    handle,
+    previews: dict[str, str]
+) -> list[dict] | None:
+    """Recursively process content previews by summarizing and submitting them.
+    
+    For each preview, gets a summary via sampling and submits it to the workflow.
+    If the workflow returns new previews, processes those recursively.
+    If the workflow returns the final result, returns it immediately.
+    After processing all previews, checks for more previews or final result.
+    
+    Args:
+        ctx: MCP context for sampling
+        handle: Temporal workflow handle
+        previews: Dictionary of story_id -> preview text to process
+        
+    Returns:
+        list[dict]: Final result if all summaries are complete, None otherwise
+    """
+    for story_id, preview in previews.items():
+        # Get summary via MCP sampling
+        summary = await _summarize_with_sampling(ctx, preview)
+        
+        # Submit summary to workflow and get result
+        result = await handle.execute_update(
+            GetLatestStories.update_story_summary,
+            SummaryInput(story_id=story_id, summary=summary)
+        )
+        
+        # If we got the final result, return it
+        if isinstance(result, list):
+            return result
+        
+        # If we got more previews, process them recursively
+        if isinstance(result, dict) and result:
+            final_result = await _process_previews(ctx, handle, result)
+            if final_result is not None:
+                return final_result
+    
+    # After processing all previews, check for more previews or final result
+    result = await handle.execute_update(GetLatestStories.update_story_summary, None)
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict) and result:
+        return await _process_previews(ctx, handle, result)
+    
+    # Not done yet, return None
+    return None
+
+
 @mcp.tool
 async def get_latest_stories(ctx: Context) -> str:
     """Get newest Hacker News stories, then classify them into 5 buckets using sampling.
@@ -105,8 +156,8 @@ async def get_latest_stories(ctx: Context) -> str:
         id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING
     )
 
-    # Execute a no-op update that exists on the workflow to trigger start-if-needed
-    await client.execute_update_with_start_workflow(
+    # Execute update-with-start to trigger start-if-needed and get the current topic
+    topic = await client.execute_update_with_start_workflow(
         update="reset_final_result_ready",
         args=[],
         start_workflow_operation=start_op,
@@ -117,42 +168,30 @@ async def get_latest_stories(ctx: Context) -> str:
 
     # start the workflow running
     handle.result()
-    final_result = None
 
     # First, if there isn't already a topic, elicit topic/keyword from the user
-    topic = await handle.query(GetLatestStories.get_topic)
     if not topic:
         query = await _elicit_topic(ctx)
         # await ctx.info("Elicitation completed - topic: " + str(query) + "; starting workflow")
         await handle.execute_update(GetLatestStories.set_topic, query)
 
-    # This is a long running workflow - an entity workflow - so it will not
-    # exit. So we will loop until the final result is ready. When it is, the
-    # client will exit, but the workflow will continue running.
-    # We can run the client again and it will NOT start a new workflow, but it will 
-    while True:
-
-        # First check if the final result is ready
-        # get the final result
-        final_result_ready = await handle.query(GetLatestStories.get_final_result_ready)
-        if final_result_ready:
-            final_result = await handle.query(GetLatestStories.get_final_result)
-            break
-
-        # Then check if the content preview is ready
-        content_preview = await handle.query(GetLatestStories.get_content_preview)
-        if content_preview:
-            # for each content preview, supply the summary via workflow update
-            for story_id, preview in content_preview.items():
-                # get the summary for this story via MCP sampling
-                summary = await _summarize_with_sampling(ctx, preview)
-                # supply content summary via workflow update
-                await handle.execute_update(GetLatestStories.update_story_summary, SummaryInput(story_id=story_id, summary=summary))
-
-        # wait for 10 seconds
-        await asyncio.sleep(10)
-
-    return json.dumps(final_result)
+    # Get initial content previews via update (passing None)
+    result = await handle.execute_update(GetLatestStories.update_story_summary, None)
+    
+    # Check if we got the final result immediately
+    if isinstance(result, list):
+        return json.dumps(result)
+    
+    # Process previews recursively - this handles all previews including new ones
+    # that come back from updates, and checks for more previews/final result
+    if isinstance(result, dict) and result:
+        final_result = await _process_previews(ctx, handle, result)
+        if final_result is not None:
+            return json.dumps(final_result)
+    
+    # If we get here, the workflow is still processing but no previews available yet
+    # Return empty result (caller can retry if needed)
+    return json.dumps([])
 
 if __name__ == "__main__":
     # Initialize and run the server

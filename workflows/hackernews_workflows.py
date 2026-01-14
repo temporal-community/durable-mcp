@@ -153,14 +153,16 @@ class GetLatestStories:
 
 
     @workflow.update
-    def reset_final_result_ready(self) -> None:
-        """This resets some variables to start a new summary of new articles
+    def reset_final_result_ready(self) -> str | None:
+        """This resets some variables to start a new summary of new articles.
+        
+        Returns the current topic if set, or None.
         """
         self.final_result_ready = False
         self.content_preview = {}
         self.summary = {}
         self.stories = []
-        return
+        return self.topic
 
     @workflow.update
     def set_topic(self, topic: str) -> None:
@@ -172,11 +174,29 @@ class GetLatestStories:
         return
     
     @workflow.update
-    def update_story_summary(self, summary_input: SummaryInput) -> None:
-        """Update the stories with the summary of the content.
-
-        Returns the mutated list for convenience.
+    async def update_story_summary(self, summary_input: SummaryInput | None) -> dict[str, str] | list[dict]:
+        """Update the stories with the summary of the content, or return available content previews.
+        
+        If summary_input is None, waits for and returns available content previews or final result.
+        If summary_input is provided, adds the summary and waits for remaining content previews or final result.
+        When all summaries are complete (no more content_previews), returns the final result.
+        
+        Returns:
+            dict[str, str]: Available content previews (story_id -> preview)
+            list[dict]: Final result with all stories and summaries (when complete)
         """
+        # If input is None, wait for content previews or final result
+        if summary_input is None:
+            # Wait until either final result is ready (and no previews) or previews are available
+            await workflow.wait_condition(
+                lambda: (not self.content_preview and self.final_result_ready) or self.content_preview
+            )
+            # If no more content previews and final result is ready, return final result
+            if not self.content_preview and self.final_result_ready:
+                return self.stories
+            return self.content_preview
+        
+        # Process the summary input
         story_id = summary_input.story_id
         summary = summary_input.summary
 
@@ -184,8 +204,18 @@ class GetLatestStories:
         self.summary[story_id] = summary
         # remove the content_preview for this story
         del self.content_preview[story_id]
-
-        return 
+        
+        # Wait until either final result is ready (and no previews) or more previews are available
+        await workflow.wait_condition(
+            lambda: (not self.content_preview and self.final_result_ready) or self.content_preview
+        )
+        
+        # If no more content previews and final result is ready, return final result
+        if not self.content_preview and self.final_result_ready:
+            return self.stories
+        
+        # Return remaining content previews
+        return self.content_preview 
     
     @workflow.query
     def get_content_preview(self) -> dict[str, str]:
